@@ -68,14 +68,29 @@ class RedTeamPoisoner:
         return dataset
 
     def _generate_benign_artifact(self, index):
-        """Generates a simple, benign Amcache/Prefetch style artifact."""
+        """Generates a realistic, benign Amcache/Prefetch style artifact."""
+        realistic_processes = [
+            {"name": "svchost.exe", "desc": "Host Process for Windows Services", "path": "C:\\Windows\\System32", "args": "-k DcomLaunch"},
+            {"name": "explorer.exe", "desc": "Windows Explorer", "path": "C:\\Windows", "args": ""},
+            {"name": "lsass.exe", "desc": "Local Security Authority Process", "path": "C:\\Windows\\System32", "args": ""},
+            {"name": "cmd.exe", "desc": "Windows Command Processor", "path": "C:\\Windows\\System32", "args": "/c echo hello"},
+            {"name": "powershell.exe", "desc": "Windows PowerShell", "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0", "args": "-NoProfile -NonInteractive"},
+            {"name": "chrome.exe", "desc": "Google Chrome", "path": "C:\\Program Files\\Google\\Chrome\\Application", "args": "--type=renderer"},
+            {"name": "msmpeng.exe", "desc": "Antimalware Service Executable", "path": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform", "args": ""},
+            {"name": "spoolsv.exe", "desc": "Spooler SubSystem App", "path": "C:\\Windows\\System32", "args": ""},
+            {"name": "taskmgr.exe", "desc": "Task Manager", "path": "C:\\Windows\\System32", "args": ""},
+            {"name": "conhost.exe", "desc": "Console Window Host", "path": "C:\\Windows\\System32", "args": "0xffffffff -ForceV1"}
+        ]
+        
+        proc = random.choice(realistic_processes)
+        
         return {
-            "FileName": f"svchost_{index}.exe",
-            "FileDescription": "Host Process for Windows Services",
-            "ProgramName": "Microsoft Windows Operating System",
-            "ExecutablePath": f"C:\\Windows\\System32\\svchost_{index}.exe",
-            "CommandLine": f"-k DcomLaunch",
-            "SHA1": f"dummyhash{index}1234567890abcdef"
+            "FileName": proc["name"],
+            "FileDescription": proc["desc"],
+            "ProgramName": "Microsoft Windows Operating System" if "Windows" in proc["path"] else "Third Party Application",
+            "ExecutablePath": f"{proc['path']}\\{proc['name']}",
+            "CommandLine": proc["args"],
+            "SHA1": f"dummyhash{index}{random.randint(100000,999999)}abcdef"
         }
 
     def _poison_artifact(self, artifact):

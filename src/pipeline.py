@@ -98,13 +98,21 @@ def load_real_data(input_dir):
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=40, fill='█', print_end="\r"):
     """
     Call in a loop to create terminal progress bar.
+    Handles standard terminals and piped environments (like Google Colab).
     """
+    import sys
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '-' * (length - filled_length)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end, flush=True)
-    if iteration == total: 
-        print()
+    
+    is_tty = sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+    if not is_tty:
+        if iteration % max(1, total // 10) == 0 or iteration == total:
+            print(f'{prefix} |{bar}| {percent}% {suffix}', flush=True)
+    else:
+        print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end, flush=True)
+        if iteration == total: 
+            print()
 
 def run_guardrail_scan(dataset, blue_team, is_simulation=False):
     """
