@@ -53,7 +53,7 @@ If you have Ollama installed and running locally (`localhost:11434`), you can ex
 
 ```bash
 # Clone the repository
-git clone [https://github.com/YOUR_USERNAME/DFIR-Guardrail.git](https://github.com/YOUR_USERNAME/DFIR-Guardrail.git)
+git clone [https://github.com/YedidyaBarGad/DFIR-Guardrail.git](https://github.com/YedidyaBarGad/DFIR-Guardrail.git)
 cd DFIR-Guardrail
 
 # Install requirements
