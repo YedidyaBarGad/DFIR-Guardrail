@@ -40,13 +40,23 @@ class BlueTeamGuardrail:
         """
         Strips zero-width spaces, decodes Base64/Hex strings, and searches for
         conversational prompt injection signatures.
+        Supports nested dictionary and list structures recursively.
         Returns (is_suspicious, cleaned_artifact_json).
         """
-        raw_text_parts = []
-        for v in artifact_json.values():
-            if isinstance(v, str):
-                raw_text_parts.append(v)
-        
+        # Convert all string values in the nested structure to a flat list of text
+        def extract_strings(val):
+            parts = []
+            if isinstance(val, str):
+                parts.append(val)
+            elif isinstance(val, dict):
+                for subv in val.values():
+                    parts.extend(extract_strings(subv))
+            elif isinstance(val, list):
+                for subv in val:
+                    parts.extend(extract_strings(subv))
+            return parts
+            
+        raw_text_parts = extract_strings(artifact_json)
         full_text = "\n".join(raw_text_parts)
         
         # 1. Clean zero-width spaces
@@ -93,13 +103,16 @@ class BlueTeamGuardrail:
         is_suspicious = any(kw in lower_text for kw in trigger_keywords) or len(decoded_payloads) > 0
         
         # Reconstruct cleaned/decoded artifact
-        cleaned_artifact = {}
-        for k, v in artifact_json.items():
-            if isinstance(v, str):
-                cleaned_val = v.replace("\u200B", "")
-                cleaned_artifact[k] = cleaned_val
-            else:
-                cleaned_artifact[k] = v
+        def clean_val(val):
+            if isinstance(val, str):
+                return val.replace("\u200B", "")
+            elif isinstance(val, dict):
+                return {subk: clean_val(subv) for subk, subv in val.items()}
+            elif isinstance(val, list):
+                return [clean_val(subv) for subv in val]
+            return val
+            
+        cleaned_artifact = clean_val(artifact_json)
                 
         if decoded_payloads:
             cleaned_artifact["__decoded_obfuscation__"] = "; ".join(decoded_payloads)
@@ -156,7 +169,7 @@ class BlueTeamGuardrail:
         percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
         filled_length = int(length * iteration // total)
         bar = fill * filled_length + '-' * (length - filled_length)
-        print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end)
+        print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end, flush=True)
         if iteration == total: 
             print()
 
