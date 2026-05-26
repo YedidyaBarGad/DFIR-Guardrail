@@ -94,6 +94,94 @@ def load_real_data(input_dir):
                 print(f"Warning: Failed to parse {filename} - {e}")
                 
     return dataset
+                
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=40, fill='█', print_end="\r"):
+    """
+    Call in a loop to create terminal progress bar.
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filled_length = int(length * iteration // total)
+    bar = fill * filled_length + '-' * (length - filled_length)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end)
+    if iteration == total: 
+        print()
+
+def run_guardrail_scan(dataset, blue_team, is_simulation=False):
+    """
+    Scans a dataset of artifacts, prints progress, maps verdicts,
+    and returns (results, analyst_report).
+    """
+    analyst_report = {
+        "metadata": {
+            "scan_time_seconds": 0,
+            "total_artifacts_scanned": len(dataset),
+            "threats_detected": 0
+        },
+        "findings": []
+    }
+    
+    if is_simulation:
+        analyst_report["metadata"]["metrics"] = {}
+
+    results = []
+    total_items = len(dataset)
+    start_time = time.time()
+
+    for idx, item in enumerate(dataset):
+        print_progress_bar(idx, total_items, prefix='Scanning:', suffix=f'({idx}/{total_items})', length=40)
+        
+        if is_simulation:
+            artifact = item["artifact"]
+            predicted_class = blue_team.classify_artifact(artifact)
+            results.append({
+                "id": item["id"],
+                "true_label": 1 if item["is_malicious"] else 0,
+                "predicted_label": predicted_class
+            })
+            source_file = "simulation"
+            content = "\n".join(f"{k}: {v}" for k, v in artifact.items() if v)
+        else:
+            artifact_for_model = {"Source": item["artifact_source"], "Content": item["content"]}
+            predicted_class = blue_team.classify_artifact(artifact_for_model)
+            source_file = item["artifact_source"]
+            content = item["content"]
+
+        if predicted_class == 1:
+            verdict = "Malicious (Prompt Injection Detected)"
+        elif predicted_class == -1:
+            verdict = "Suspicious (Inference Error / Potential Bypass)"
+        else:
+            verdict = "Safe (Benign)"
+
+        report_entry = {
+            "id": idx + 1,
+            "verdict": verdict
+        }
+        
+        if not is_simulation:
+            report_entry["source_file"] = source_file
+        else:
+            report_entry["ground_truth"] = "Malicious" if item["is_malicious"] else "Benign"
+
+        is_threat = (predicted_class == 1 or predicted_class == -1)
+        if is_threat:
+            analyst_report["metadata"]["threats_detected"] += 1
+            report_entry["suspicious_content"] = content
+            if predicted_class == -1:
+                report_entry["error_detail"] = "The guardrail LLM failed to analyze this artifact. Flagged as suspicious under fail-closed security policy."
+
+        analyst_report["findings"].append(report_entry)
+
+    print_progress_bar(total_items, total_items, prefix='Scanning:', suffix=f'({total_items}/{total_items})', length=40)
+    
+    elapsed = time.time() - start_time
+    analyst_report["metadata"]["scan_time_seconds"] = round(elapsed, 2)
+    
+    if is_simulation:
+        metrics = compute_metrics(results)
+        analyst_report["metadata"]["metrics"] = metrics
+        
+    return results, analyst_report
 
 def main():
     parser = argparse.ArgumentParser(description="DFIR-Guardrail Pipeline")
@@ -121,46 +209,8 @@ def main():
         print(f"-> Loaded {len(dataset)} items containing high-risk fields for analysis.")
         print(f"\n[Blue Team] Scanning artifacts via Ollama (Model: {model_name})...")
         
-        start_time = time.time()
-        
-        # Initialize structured analyst report
-        analyst_report = {
-            "metadata": {
-                "scan_time_seconds": 0,
-                "total_artifacts_scanned": len(dataset),
-                "threats_detected": 0
-            },
-            "findings": []
-        }
-
-        # Process each artifact sequentially
-        for idx, item in enumerate(dataset):
-            artifact_for_model = {"Source": item["artifact_source"], "Content": item["content"]}
-            predicted_class = blue_team.classify_artifact(artifact_for_model)
-
-            if predicted_class == 1:
-                verdict = "Malicious (Prompt Injection Detected)"
-            elif predicted_class == -1:
-                verdict = "Suspicious (Inference Error / Potential Bypass)"
-            else:
-                verdict = "Safe (Benign)"
-
-            report_entry = {
-                "id": idx + 1,
-                "source_file": item["artifact_source"],
-                "verdict": verdict
-            }
+        _, analyst_report = run_guardrail_scan(dataset, blue_team, is_simulation=False)
             
-            is_threat = (predicted_class == 1 or predicted_class == -1)
-            if is_threat:
-                analyst_report["metadata"]["threats_detected"] += 1
-                report_entry["suspicious_content"] = item["content"]
-                if predicted_class == -1:
-                    report_entry["error_detail"] = "The guardrail LLM failed to analyze this artifact. Flagged as suspicious under fail-closed security policy."
-            
-            analyst_report["findings"].append(report_entry)
-            
-        analyst_report["metadata"]["scan_time_seconds"] = round(time.time() - start_time, 2)
         print(f"-> Processing complete in {analyst_report['metadata']['scan_time_seconds']} seconds.")
         print(f"-> Detected {analyst_report['metadata']['threats_detected']} potential prompt injections.")
         
@@ -183,20 +233,30 @@ def main():
         malicious_count = sum(1 for item in dataset if item.get("is_malicious", False))
         print(f"-> Generated {len(dataset)} artifacts ({malicious_count} malicious).")
         
-        print(f"\n[Blue Team] Processing sequentially via Ollama (Model: {model_name})...")
-        start_time = time.time()
-        results = blue_team.process_sequential(dataset)
-        elapsed = time.time() - start_time
-        print(f"-> Processing complete in {elapsed:.2f} seconds.")
+        print(f"\n[Blue Team] Scanning artifacts via Ollama (Model: {model_name})...")
+        
+        results, analyst_report = run_guardrail_scan(dataset, blue_team, is_simulation=True)
+        
+        print(f"-> Processing complete in {analyst_report['metadata']['scan_time_seconds']} seconds.")
+        print(f"-> Detected {analyst_report['metadata']['threats_detected']} potential prompt injections.")
         
         print("\n--- Evaluation Metrics ---")
-        metrics = compute_metrics(results)
+        metrics = analyst_report["metadata"]["metrics"]
         for k, v in metrics.items():
             if isinstance(v, float): 
                 print(f"{k}: {v:.2%}")
             else: 
                 print(f"{k}: {v}")
-
+                
+        # Save results
+        output_dir = args.output_dir or "."
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "guardrail_simulation.json")
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(analyst_report, f, indent=4)
+            
+        print(f"-> Simulation results saved to: {output_path}")
+        
     print("\n--- DFIR-Guardrail Pipeline Finished ---")
 
 if __name__ == "__main__":

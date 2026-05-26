@@ -69,20 +69,22 @@ pip install -r requirements.txt
 You can execute the pipeline in one of two modes:
 
 #### 1. Simulation Mode (Red Team Testing)
-Runs the end-to-end evaluation using a generated synthetic dataset to compute detection accuracy metrics.
+Generates a synthetic dataset of forensic artifacts injected with obfuscated payloads, runs the scan, prints evaluation metrics, and saves the structured analyst report to `guardrail_simulation.json`.
 ```bash
-python -m src.pipeline
+python -m src.pipeline --num_samples 5000 --poison_ratio 0.01
 ```
 
 #### 2. Operational Mode (Scan Real Artifacts)
-Scans real Windows forensic artifacts parsed from tools like **KAPE** or **Velociraptor** (in JSON format) and generates a structured threat report.
+Scans real Windows forensic artifacts parsed from tools like **KAPE** or **Velociraptor** (in JSON format) and generates a structured threat report saved to `guardrail_analysis.json`.
 ```bash
 python -m src.pipeline --input_dir /path/to/forensics/json --output_dir /path/to/output/reports
 ```
 
 **CLI Options:**
 *   `--input_dir`: Path to the directory containing parsed JSON forensic artifacts for analysis.
-*   `--output_dir`: Path where the structured scan report (`guardrail_analysis.json`) will be saved.
+*   `--output_dir`: Path where the structured scan report (`guardrail_analysis.json` or `guardrail_simulation.json`) will be saved.
+*   `--num_samples`: (Simulation only) Number of synthetic artifacts to generate (default: `50`).
+*   `--poison_ratio`: (Simulation only) Proportion of artifacts to inject with prompt payloads, e.g., `0.2` for 20% (default: `0.2`).
 
 ---
 
@@ -91,11 +93,12 @@ python -m src.pipeline --input_dir /path/to/forensics/json --output_dir /path/to
 By combining a **Hybrid Filtering Approach** with LLM classification, the pipeline achieves high speed and zero-trust security even without local GPU acceleration. 
 
 ### ⚡ 5,000-Artifact Scale Benchmark
-To test the pipeline's operational performance, we ran a scan of **5,000 Windows forensic artifacts** containing 4,950 benign items and 50 highly obfuscated prompt injections (Base64, Hex, zero-width spaces, and roleplay overrides):
-*   **Detection Accuracy:** 100% of prompt injections detected.
-*   **Filter Bypass Rate:** 100% of benign artifacts (4,950/4,950) successfully bypassed the LLM.
-*   **Scan Duration:** **204.37 seconds** (averaging 4s per failed localhost network timeout on the 50 suspicious items).
-*   **Performance Optimization:** Without hybrid filtering, a sequential LLM scan on the same dataset would take **5.5 hours**. The pre-filtering mechanism achieved a **98.9% reduction in execution time**.
+To test the pipeline's operational performance, we ran a simulation scan of **5,000 Windows forensic artifacts** with a **1% poison ratio** (46 malicious, 4,954 benign) using Microsoft `phi3` on a local GPU:
+*   **True Positives / True Negatives:** 45 / 4,954 (detected 45 out of 46 prompt injections, with 1 False Negative).
+*   **False Positives / Errors:** 0 / 0 (0% False Positive Rate).
+*   **Filter Bypass Rate:** 100% of benign artifacts (4,954/4,954) successfully bypassed the LLM.
+*   **Scan Duration:** **75.90 seconds** (averaging ~1.6s inference per suspicious artifact).
+*   **Performance Optimization:** Without hybrid filtering, a sequential LLM scan of all 5,000 logs would take **2.2 hours** (8,000 seconds). The pre-filtering mechanism achieved a **99.0% reduction in execution time**.
 
 
 ---

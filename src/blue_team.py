@@ -152,13 +152,24 @@ class BlueTeamGuardrail:
             print(f"Error communicating with Ollama: {e}")
             return -1
 
+    def _print_progress_bar(self, iteration, total, prefix='', suffix='', decimals=1, length=40, fill='█', print_end="\r"):
+        percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+        filled_length = int(length * iteration // total)
+        bar = fill * filled_length + '-' * (length - filled_length)
+        print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end)
+        if iteration == total: 
+            print()
+
     def process_sequential(self, dataset):
         results = []
-        for item in dataset:
+        total_items = len(dataset)
+        for idx, item in enumerate(dataset):
+            self._print_progress_bar(idx, total_items, prefix='Analyzing:', suffix=f'({idx}/{total_items})', length=40)
             predicted_class = self.classify_artifact(item["artifact"])
             results.append({
                 "id": item["id"],
                 "true_label": 1 if item["is_malicious"] else 0,
                 "predicted_label": predicted_class
             })
+        self._print_progress_bar(total_items, total_items, prefix='Analyzing:', suffix=f'({total_items}/{total_items})', length=40)
         return results
