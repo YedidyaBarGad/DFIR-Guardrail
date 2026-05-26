@@ -1,4 +1,5 @@
 import time
+import requests
 from src.red_team import RedTeamPoisoner
 from src.blue_team import BlueTeamGuardrail
 
@@ -63,6 +64,18 @@ def main():
     
     # 3. Process with Guardrail LLM
     print(f"\n[Blue Team] Processing sequentially via Ollama (Model: {model_name})...")
+    
+    # Warm up the GPU to absorb the cold-start penalty
+    print("Warming up the GPU with an empty prompt...")
+    try:
+        _ = requests.post(
+            "http://localhost:11434/api/generate", 
+            json={"model": model_name, "prompt": "warmup", "keep_alive": -1},
+            timeout=120
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"Warning: Warm-up call encountered an issue: {e}")
+
     start_time = time.time()
     results = blue_team.process_sequential(dataset)
     elapsed = time.time() - start_time

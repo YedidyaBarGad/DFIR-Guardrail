@@ -27,7 +27,7 @@ class BlueTeamGuardrail:
         }
         
         try:
-            response = requests.post(f"{self.ollama_host}/api/generate", json=payload, timeout=30)
+            response = requests.post(f"{self.ollama_host}/api/generate", json=payload, timeout=120)
             response.raise_for_status()
             result = response.json().get("response", "").strip()
             
