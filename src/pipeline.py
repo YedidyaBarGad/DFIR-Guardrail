@@ -57,12 +57,12 @@ def extract_high_risk_fields(item):
         "PayloadData", "Message"
     ]
     
-    extracted_content = []
+    extracted_content = {}
     for key, value in item.items():
         if any(risk_key.lower() in key.lower() for risk_key in high_risk_keys) and value:
-            extracted_content.append(f"{key}: {value}")
+            extracted_content[key] = value
             
-    return "\n".join(extracted_content)
+    return extracted_content
 
 def load_real_data(input_dir):
     """
@@ -102,7 +102,7 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '-' * (length - filled_length)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end, flush=True)
     if iteration == total: 
         print()
 
@@ -139,7 +139,7 @@ def run_guardrail_scan(dataset, blue_team, is_simulation=False):
                 "predicted_label": predicted_class
             })
             source_file = "simulation"
-            content = "\n".join(f"{k}: {v}" for k, v in artifact.items() if v)
+            content = artifact
         else:
             artifact_for_model = {"Source": item["artifact_source"], "Content": item["content"]}
             predicted_class = blue_team.classify_artifact(artifact_for_model)
