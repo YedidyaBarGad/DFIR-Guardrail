@@ -1,6 +1,8 @@
 import json
 import requests
 import re
+import base64
+import binascii
 
 class BlueTeamGuardrail:
     def __init__(self, ollama_host="http://localhost:11434", model_name="phi3"):
@@ -34,10 +36,85 @@ class BlueTeamGuardrail:
             "<result>1</result>"
         )
 
+    def _pre_filter_and_clean(self, artifact_json):
+        """
+        Strips zero-width spaces, decodes Base64/Hex strings, and searches for
+        conversational prompt injection signatures.
+        Returns (is_suspicious, cleaned_artifact_json).
+        """
+        raw_text_parts = []
+        for v in artifact_json.values():
+            if isinstance(v, str):
+                raw_text_parts.append(v)
+        
+        full_text = "\n".join(raw_text_parts)
+        
+        # 1. Clean zero-width spaces
+        cleaned_text = full_text.replace("\u200B", "")
+        
+        # 2. Programmatic Base64 & Hex decoding
+        decoded_payloads = []
+        tokens = cleaned_text.split()
+        for token in tokens:
+            clean_token = token.strip(".,;:\"'()[]{}#")
+            if len(clean_token) >= 8:
+                # Try Base64
+                try:
+                    padded = clean_token + "=" * ((4 - len(clean_token) % 4) % 4)
+                    b_decoded = base64.b64decode(padded.encode('utf-8'), validate=True).decode('utf-8', errors='strict')
+                    if all(32 <= ord(c) < 127 or c in "\r\n\t" for c in b_decoded) and len(b_decoded) > 3:
+                        decoded_payloads.append(b_decoded)
+                except Exception:
+                    pass
+                
+                # Try Hex
+                if all(c in "0123456789abcdefABCDEF" for c in clean_token) and len(clean_token) % 2 == 0:
+                    try:
+                        h_decoded = bytes.fromhex(clean_token).decode('utf-8', errors='strict')
+                        if all(32 <= ord(c) < 127 or c in "\r\n\t" for c in h_decoded) and len(h_decoded) > 3:
+                            decoded_payloads.append(h_decoded)
+                    except Exception:
+                        pass
+        
+        # 3. Combine original values with any decoded content
+        analyzable_text = cleaned_text
+        if decoded_payloads:
+            analyzable_text += "\n" + "\n".join(decoded_payloads)
+            
+        # 4. Trigger keywords
+        trigger_keywords = [
+            "ignore previous", "disregard", "system override", 
+            "drop all context", "classify as 0", "return 0 immediately", 
+            "status: secure", "llm_bypass", "override analysis", "output benign",
+            "output 0", "ignore instructions", "system instructions"
+        ]
+        
+        lower_text = analyzable_text.lower()
+        is_suspicious = any(kw in lower_text for kw in trigger_keywords) or len(decoded_payloads) > 0
+        
+        # Reconstruct cleaned/decoded artifact
+        cleaned_artifact = {}
+        for k, v in artifact_json.items():
+            if isinstance(v, str):
+                cleaned_val = v.replace("\u200B", "")
+                cleaned_artifact[k] = cleaned_val
+            else:
+                cleaned_artifact[k] = v
+                
+        if decoded_payloads:
+            cleaned_artifact["__decoded_obfuscation__"] = "; ".join(decoded_payloads)
+            
+        return is_suspicious, cleaned_artifact
+
     def classify_artifact(self, artifact_json):
+        is_suspicious, cleaned_json = self._pre_filter_and_clean(artifact_json)
+        if not is_suspicious:
+            # Bypass LLM completely for clean/non-suspicious traffic
+            return 0
+
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"Analyze this artifact:\n{json.dumps(artifact_json, indent=2)}"}
+            {"role": "user", "content": f"Analyze this artifact:\n{json.dumps(cleaned_json, indent=2)}"}
         ]
         
         payload = {
