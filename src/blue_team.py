@@ -21,25 +21,38 @@ class BlueTeamGuardrail:
 
     def classify_artifact(self, artifact_json):
         """
-        Sends a single artifact to the local Ollama daemon for classification.
+        Sends a single artifact to the local Ollama daemon using the Chat API.
         Returns 1 for Malicious, 0 for Benign, or -1 for Error.
         """
-        prompt = f"{self.system_prompt}\n\nAnalyze this artifact:\n{json.dumps(artifact_json, indent=2)}"
+        # Separate the roles into a structured message array
+        messages = [
+            {
+                "role": "system",
+                "content": self.system_prompt
+            },
+            {
+                "role": "user",
+                "content": f"Analyze this artifact:\n{json.dumps(artifact_json, indent=2)}"
+            }
+        ]
         
         payload = {
             "model": self.model_name,
-            "prompt": prompt,
+            "messages": messages,
             "stream": False,
-            "keep_alive": -1  # Keeps the model loaded in GPU memory permanently
+            "keep_alive": -1,
+            "options": {
+                "temperature": 0.0 # Force maximum determinism to prevent hallucinations
+            }
         }
         
         try:
-            # Maintained the 120-second timeout to handle large artifacts
-            response = requests.post(f"{self.ollama_host}/api/generate", json=payload, timeout=120)
+            # Shift to the /api/chat endpoint
+            response = requests.post(f"{self.ollama_host}/api/chat", json=payload, timeout=120)
             response.raise_for_status()
             
-            # Strip whitespace to isolate the single character output
-            result = response.json().get("response", "").strip()
+            # The JSON response structure is different for the chat endpoint
+            result = response.json().get("message", {}).get("content", "").strip()
             
             # Strict parsing based on the new formatting rule
             if result == "1":
@@ -47,12 +60,14 @@ class BlueTeamGuardrail:
             elif result == "0":
                 return 0
             else:
-                # Fallback check in case the model hallucinates surrounding text despite the prompt
-                if "1" in result and "0" not in result:
-                    return 1
-                elif "0" in result and "1" not in result:
-                    return 0
-                    
+                # Aggressive fallback parsing: extract just the first number found
+                import re
+                match = re.search(r'[01]', result)
+                if match:
+                    extracted = int(match.group(0))
+                    print(f"Notice: Model padded output ('{result}'). Auto-extracted: {extracted}")
+                    return extracted
+                
                 print(f"Warning: Unexpected LLM output format: {result}")
                 return -1 # Parsing error
                 
