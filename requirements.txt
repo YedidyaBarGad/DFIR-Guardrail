@@ -1,1 +1,8 @@
 requests==2.31.0
+fastapi
+uvicorn
+pydantic
+aiohttp
+httpx
+tqdm
+pytest-asyncio
