@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Local outputs & temporary artifacts
+guardrail_analysis.json
+guardrail_simulation.json
+large_test_input/
+large_test_output/
+scratch_input/
+scratch_output/
