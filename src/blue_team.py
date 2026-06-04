@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 
 class BlueTeamGuardrail:
-    def __init__(self, ollama_host="http://localhost:11434", model_name="phi3:mini", max_concurrent_requests=4):
+    def __init__(self, ollama_host="http://localhost:11434", model_name="phi3:mini", max_concurrent_requests=3):
         self.ollama_host = ollama_host
         self.model_name = model_name
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)

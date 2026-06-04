@@ -159,8 +159,10 @@ async def async_main():
     parser.add_argument("--output_dir", type=str, help="Path to save the validation results")
     parser.add_argument("--num_samples", type=int, default=50, help="Number of samples to generate for Red Team simulation")
     parser.add_argument("--poison_ratio", type=float, default=0.2, help="Poison ratio for Red Team simulation")
-    parser.add_argument("--mode", type=str, default="async", choices=["async", "sequential", "compare"], help="Execution mode")
-    parser.add_argument("--max_concurrent_requests", type=int, default=2, help="Maximum concurrent requests to the LLM")
+    parser.add_argument("--mode", type=str, choices=["sim", "ops", "compare"], default="sim",
+                        help="Mode: 'sim' for synthetic dataset generation, 'ops' for real JSON scanning, 'compare' for benchmark.")
+    parser.add_argument("--concurrency", type=int, default=3,
+                        help="Number of concurrent LLM requests to make in async mode (should match OLLAMA_NUM_PARALLEL).")
     args = parser.parse_args()
 
     print("--- Starting DFIR-Guardrail Pipeline ---")
@@ -170,7 +172,7 @@ async def async_main():
     blue_team = BlueTeamGuardrail(
         ollama_host=ollama_host, 
         model_name=model_name, 
-        max_concurrent_requests=args.max_concurrent_requests
+        max_concurrent_requests=args.concurrency
     )
 
     if args.input_dir and args.output_dir:
