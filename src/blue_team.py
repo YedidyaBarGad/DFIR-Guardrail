@@ -110,7 +110,11 @@ class BlueTeamGuardrail:
         
         def clean_val(val):
             if isinstance(val, str):
-                return val.replace("\u200B", "")
+                clean_s = val.replace("\u200B", "")
+                # Truncate exceptionally large fields to prevent context max-out
+                if len(clean_s) > 1500:
+                    return clean_s[:1500] + "...[TRUNCATED]"
+                return clean_s
             elif isinstance(val, dict):
                 return {subk: clean_val(subv) for subk, subv in val.items()}
             elif isinstance(val, list):
@@ -139,7 +143,8 @@ class BlueTeamGuardrail:
             "stream": False,
             "options": {
                 "temperature": 0.0,
-                "num_ctx": 1024 # Limit context size so multiple instances fit in VRAM
+                "num_ctx": 1024, # Limit context size so multiple instances fit in VRAM
+                "num_predict": 150 # Prevent massive Token Generation by capping output
             }
         }
         try:

@@ -160,13 +160,18 @@ async def async_main():
     parser.add_argument("--num_samples", type=int, default=50, help="Number of samples to generate for Red Team simulation")
     parser.add_argument("--poison_ratio", type=float, default=0.2, help="Poison ratio for Red Team simulation")
     parser.add_argument("--mode", type=str, default="async", choices=["async", "sequential", "compare"], help="Execution mode")
+    parser.add_argument("--max_concurrent_requests", type=int, default=2, help="Maximum concurrent requests to the LLM")
     args = parser.parse_args()
 
     print("--- Starting DFIR-Guardrail Pipeline ---")
     model_name = os.getenv("LLM_MODEL", "phi3:mini")
     ollama_host = os.getenv("LLM_ENDPOINT", "http://localhost:11434")
     
-    blue_team = BlueTeamGuardrail(ollama_host=ollama_host, model_name=model_name)
+    blue_team = BlueTeamGuardrail(
+        ollama_host=ollama_host, 
+        model_name=model_name, 
+        max_concurrent_requests=args.max_concurrent_requests
+    )
 
     if args.input_dir and args.output_dir:
         dataset = load_real_data(args.input_dir)
