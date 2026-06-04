@@ -3,6 +3,7 @@ import argparse
 import os
 import json
 import asyncio
+import logging
 
 from src.red_team import RedTeamPoisoner
 from src.blue_team import BlueTeamGuardrail
@@ -121,6 +122,7 @@ async def run_guardrail_scan_async(dataset, blue_team, is_simulation=False, mode
         analyst_report["metadata"]["metrics"] = {}
 
     start_time = time.time()
+    logging.info(f"========== STARTING SCAN: MODE={mode.upper()} ==========")
     
     tasks = [analyze_single(idx, item, blue_team, is_simulation) for idx, item in enumerate(dataset)]
     

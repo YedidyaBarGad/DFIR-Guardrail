@@ -2,12 +2,24 @@ import json
 import base64
 import asyncio
 import httpx
+import time
+import logging
+
+# Set up detailed logging to a file
+logging.basicConfig(
+    filename='guardrail_execution.log',
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    filemode='w'
+)
 
 class BlueTeamGuardrail:
     def __init__(self, ollama_host="http://localhost:11434", model_name="phi3:mini", max_concurrent_requests=4):
         self.ollama_host = ollama_host
         self.model_name = model_name
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self.active_requests = 0 # Track concurrency
+
         
         # Shared HTTPX client with connection pooling
         limits = httpx.Limits(max_connections=max_concurrent_requests * 2, max_keepalive_connections=max_concurrent_requests)
@@ -112,7 +124,11 @@ class BlueTeamGuardrail:
             
         return is_suspicious, cleaned_artifact
 
-    async def _classify_single(self, artifact_json: dict) -> int:
+    async def _classify_single(self, artifact_id: str, artifact_json: dict) -> int:
+        self.active_requests += 1
+        start_time = time.time()
+        logging.info(f"START | Artifact ID: {artifact_id} | Active Concurrent Requests: {self.active_requests}")
+        
         prompt = (
             f"{self.system_prompt}\n\n"
             f"ARTIFACT TO ANALYZE:\n{json.dumps(artifact_json, indent=2)}"
@@ -134,23 +150,35 @@ class BlueTeamGuardrail:
             response.raise_for_status()
             llm_text = response.json().get("response", "")
             
+            duration = time.time() - start_time
             if "<result>1</result>" in llm_text:
-                return 1
+                res = 1
             elif "<result>0</result>" in llm_text:
-                return 0
+                res = 0
             else:
-                return -1
+                res = -1
+                
+            logging.info(f"SUCCESS | Artifact ID: {artifact_id} | Duration: {duration:.2f}s | Result: {res} | Active Requests: {self.active_requests}")
+            self.active_requests -= 1
+            return res
+            
         except Exception as e:
-            print(f"Error calling LLM sequentially: {e}")
+            duration = time.time() - start_time
+            logging.error(f"ERROR | Artifact ID: {artifact_id} | Duration: {duration:.2f}s | Exception: {e} | Active Requests: {self.active_requests}")
+            self.active_requests -= 1
             return -1
 
     async def classify_artifact(self, artifact_id: str, artifact_json: dict) -> int:
         is_suspicious, cleaned_json = self._pre_filter_and_clean(artifact_json)
         
         if not is_suspicious:
-            return 0 # Fast path for safe traffic
+            # Fast path bypasses the LLM completely
+            return 0 
+            
+        if artifact_id != "warmup":
+            logging.info(f"QUEUED | Artifact ID: {artifact_id} is waiting for semaphore...")
             
         # Asynchronous Sequential Processing via Semaphore
         async with self.semaphore:
-            result = await self._classify_single(cleaned_json)
+            result = await self._classify_single(artifact_id, cleaned_json)
         return result
