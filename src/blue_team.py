@@ -4,6 +4,7 @@ import asyncio
 import httpx
 import time
 import logging
+import re
 
 # Set up detailed logging to a file
 logging.basicConfig(
@@ -143,8 +144,8 @@ class BlueTeamGuardrail:
             "stream": False,
             "options": {
                 "temperature": 0.0,
-                "num_ctx": 1024, # Limit context size so multiple instances fit in VRAM
-                "num_predict": 150 # Prevent massive Token Generation by capping output
+                "num_ctx": 1024, 
+                "num_predict": 150 
             }
         }
         try:
@@ -156,13 +157,23 @@ class BlueTeamGuardrail:
             llm_text = response.json().get("response", "")
             
             duration = time.time() - start_time
-            if "<result>1</result>" in llm_text:
-                res = 1
-            elif "<result>0</result>" in llm_text:
-                res = 0
+            
+            # Flexible Regex for <result> tags
+            match = re.search(r'<\s*result\s*>\s*([01])\s*<\s*/\s*result\s*>', llm_text, re.IGNORECASE)
+
+            if match:
+                res = int(match.group(1))
             else:
-                res = -1
-                
+                # Fallback if tags were dropped
+                loose_match = re.search(r'(?:result|classification|output)[\s:]*([01])', llm_text, re.IGNORECASE)
+                if loose_match:
+                    res = int(loose_match.group(1))
+                else:
+                    # The model generated unparseable text
+                    res = -1
+                    logging.warning(f"UNPARSEABLE | Artifact ID: {artifact_id} | Unparseable Output: {llm_text.strip()}")
+                            
+            # FIXED INDENTATION: These run for ALL outcomes
             logging.info(f"SUCCESS | Artifact ID: {artifact_id} | Duration: {duration:.2f}s | Result: {res} | Active Requests: {self.active_requests}")
             self.active_requests -= 1
             return res
