@@ -180,6 +180,10 @@ async def async_main():
         
     print(f"-> {'Generated' if is_sim else 'Loaded'} {len(dataset)} items containing high-risk fields.")
     
+    # Warm up the LLM to load the model into VRAM and avoid skewing the timer
+    print("Warming up the LLM (Loading model into VRAM)...")
+    await blue_team.classify_artifact("warmup", {"Message": "Hello model, please wake up."})
+    
     if args.mode == "compare":
         print("\n--- Running Pure Sequential Baseline ---")
         _, report_seq = await run_guardrail_scan_async(dataset, blue_team, is_simulation=is_sim, mode="sequential")
@@ -219,6 +223,8 @@ async def async_main():
     output_path = os.path.join(output_dir, filename)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(analyst_report, f, indent=4)
+        
+    await blue_team.close()
 
 if __name__ == "__main__":
     asyncio.run(async_main())

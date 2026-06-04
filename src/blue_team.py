@@ -4,10 +4,14 @@ import asyncio
 import httpx
 
 class BlueTeamGuardrail:
-    def __init__(self, ollama_host="http://localhost:11434", model_name="phi3:mini", max_concurrent_requests=8):
+    def __init__(self, ollama_host="http://localhost:11434", model_name="phi3:mini", max_concurrent_requests=4):
         self.ollama_host = ollama_host
         self.model_name = model_name
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        
+        # Shared HTTPX client with connection pooling
+        limits = httpx.Limits(max_connections=max_concurrent_requests * 2, max_keepalive_connections=max_concurrent_requests)
+        self.client = httpx.AsyncClient(timeout=120.0, limits=limits)
         
         # System prompt instructions
         self.system_prompt = (
@@ -36,12 +40,10 @@ class BlueTeamGuardrail:
             "<result>1</result>"
         )
 
+    async def close(self):
+        await self.client.aclose()
+
     def _pre_filter_and_clean(self, artifact_json):
-        """
-        Strips zero-width spaces, decodes Base64/Hex strings, and searches for
-        conversational prompt injection signatures.
-        Returns (is_suspicious, cleaned_artifact_json).
-        """
         def extract_strings(val):
             parts = []
             if isinstance(val, str):
@@ -120,24 +122,24 @@ class BlueTeamGuardrail:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0.0
+                "temperature": 0.0,
+                "num_ctx": 1024 # Limit context size so multiple instances fit in VRAM
             }
         }
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{self.ollama_host}/api/generate",
-                    json=payload
-                )
-                response.raise_for_status()
-                llm_text = response.json().get("response", "")
-                
-                if "<result>1</result>" in llm_text:
-                    return 1
-                elif "<result>0</result>" in llm_text:
-                    return 0
-                else:
-                    return -1
+            response = await self.client.post(
+                f"{self.ollama_host}/api/generate",
+                json=payload
+            )
+            response.raise_for_status()
+            llm_text = response.json().get("response", "")
+            
+            if "<result>1</result>" in llm_text:
+                return 1
+            elif "<result>0</result>" in llm_text:
+                return 0
+            else:
+                return -1
         except Exception as e:
             print(f"Error calling LLM sequentially: {e}")
             return -1
