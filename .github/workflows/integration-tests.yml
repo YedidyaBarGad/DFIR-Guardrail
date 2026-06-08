@@ -47,4 +47,5 @@ jobs:
       run: |
         # Run standard pytest or your custom pipeline evaluation mode
         # pytest tests/
-        python src/pipeline.py --mode compare --num_samples 10
+        cd src
+        python pipeline.py --mode compare --num_samples 10
