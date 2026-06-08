@@ -129,19 +129,19 @@ To test the pipeline's operational performance, we ran a direct comparison scan 
 --- Comparison Results ---
 Metric                    | Sequential Baseline  | Async Sequential    
 -----------------------------------------------------------------------
-Scan Time                 | 277.97             s | 160.64             s
-Speedup                   | 1.00x                | 1.73               x
+Scan Time                 | 347.76             s | 149.42             s
+Speedup                   | 1.00x                | 2.33               x
 Total processed           | 1000                 | 1000                
-True Positives            | 187                  | 188                 
+True Positives            | 187                  | 189                 
 True Negatives            | 806                  | 806                 
 False Positives           | 0                    | 0                   
-False Negatives           | 6                    | 6                   
+False Negatives           | 6                    | 5                   
 Errors                    | 1                    | 0                   
 False Positive Rate (FPR) | 0.00%                | 0.00%               
-False Negative Rate (FNR) | 3.11%                | 3.09%               
+False Negative Rate (FNR) | 3.11%                | 2.58%               
 ```
 
-* **Performance Optimization:** Shifting from standard sequential HTTP queries to connection-pooled Async IO with constrained context windows yielded a **1.73x Speedup** while preserving the incredibly low 3.09% False Negative Rate.
+* **Performance Optimization:** Shifting from standard sequential HTTP queries to connection-pooled Async IO with constrained context windows yielded a **2.33x Speedup** while dropping the False Negative Rate down to an incredibly low **2.58%**.
 
 ---
 
@@ -151,12 +151,14 @@ This project is a **Proof of Concept (PoC)** designed for security research and 
 
 ### 🚀 Completed Hardening
 
+* **Structured LLM Outputs & Roles:** Enforces strict JSON schemas (`{"analysis": "...", "result": X}`) and explicitly isolates system instructions from untrusted user payloads using native Chat API roles to mitigate recursive prompt injection.
+* **Semantic Evasion & Entropy Detection:** Deployed `sentence-transformers` for dynamic Cosine Similarity scoring against adversarial intent, and `shannon_entropy` mathematical calculations to catch undocumented obfuscation techniques without relying on brittle regex keywords.
+* **Architectural Resilience (DoS/OOM Protection):** Replaced legacy RAM-heavy JSON parsing with `ijson` streaming for infinite scale, integrated an active Circuit Breaker pattern to fast-fail hangs without timing out, and secured forensic logs via `RotatingFileHandler`.
 * **Fail-Closed Model:** Network timeouts or inference failures (returning `-1`) fail closed, quarantining the event as a potential bypass rather than failing open.
-* **Hybrid Pre-Filtering:** Removal of zero-width spaces (`\u200B`) and programmatic decoding (Base64/Hex) before LLM routing, bypassing the LLM for 99% of benign logs.
 * **Asynchronous Concurrency:** Eradicated the sequential HTTP bottleneck. Replaced it with asyncio Semaphores and explicitly constrained context memory targeting single-GPU saturation without OOM failures.
 
 ### 🔍 Remaining Production Gaps
 
-* **Prompt Robustness:** Small Language Models (SLMs) remain vulnerable to advanced jailbreaking techniques (cognitive load, roleplay overrides).
+* **Prompt Robustness:** Small Language Models (SLMs) remain vulnerable to advanced jailbreaking techniques (cognitive load, roleplay overrides) that mimic benign system data perfectly.
 * **Schema & Format Ingestion:** Hardcoded heuristic field filtering; lacks standardized schema normalizations (e.g., Elastic Common Schema) or multi-format ingestion (CSV, EVTX, XML).
 * **Operations & Observability:** Configuration is hardcoded; lacks structured JSON logging (for Splunk/SIEM ingestion) and Prometheus monitoring metrics.
