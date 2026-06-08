@@ -1,0 +1,50 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-pipeline:
+    runs-on: ubuntu-latest
+    
+    # Spin up Ollama as a service container
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install Project Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+
+    - name: Pull LLM Model into Service Container
+      run: |
+        # Give the service a moment to fully initialize
+        sleep 5 
+        # Execute the pull command inside the running Ollama container
+        curl -X POST http://localhost:11434/api/pull -d '{"name": "phi3:mini"}'
+
+    - name: Run Pipeline Integration Tests
+      env:
+        LLM_ENDPOINT: "http://localhost:11434"
+        LLM_MODEL: "phi3:mini"
+      run: |
+        # Run standard pytest or your custom pipeline evaluation mode
+        # pytest tests/
+        python pipeline.py --mode compare --num_samples 10
