@@ -4,6 +4,7 @@ import os
 import json
 import asyncio
 import logging
+import ijson
 
 from src.red_team import RedTeamPoisoner
 from src.blue_team import BlueTeamGuardrail
@@ -45,23 +46,44 @@ def extract_high_risk_fields(item):
 def load_real_data(input_dir):
     dataset = []
     if not os.path.exists(input_dir): return dataset
+    
+    # OS File size limit to prevent Memory Exhaustion
+    MAX_FILE_SIZE = 50 * 1024 * 1024 # 50 MB
+    
     for filename in os.listdir(input_dir):
         if filename.endswith(".json"):
             filepath = os.path.join(input_dir, filename)
+            
+            if os.path.getsize(filepath) > MAX_FILE_SIZE:
+                logging.warning(f"File {filename} exceeds 50MB limit. Skipping to prevent memory exhaustion.")
+                continue
+                
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        for idx, item in enumerate(data):
+                # Streaming JSON Parser (ijson) to prevent JSON bombs
+                with open(filepath, 'rb') as f:
+                    # Detect if root is list or dict based on first token
+                    parser = ijson.parse(f)
+                    prefix, event, value = next(parser)
+                    
+                    # Reset file pointer
+                    f.seek(0)
+                    
+                    if event == 'start_array':
+                        idx = 0
+                        for item in ijson.items(f, 'item'):
                             if isinstance(item, dict):
                                 relevant_text = extract_high_risk_fields(item)
                                 if relevant_text:
                                     dataset.append({"id": f"{filename}_{idx}", "artifact_source": filename, "content": relevant_text})
-                    elif isinstance(data, dict):
-                        relevant_text = extract_high_risk_fields(data)
-                        if relevant_text:
-                            dataset.append({"id": filename, "artifact_source": filename, "content": relevant_text})
-            except Exception:
+                            idx += 1
+                    else:
+                        for key, value in ijson.kvitems(f, ''):
+                            if isinstance(value, dict):
+                                relevant_text = extract_high_risk_fields(value)
+                                if relevant_text:
+                                    dataset.append({"id": f"{filename}_{key}", "artifact_source": filename, "content": relevant_text})
+            except Exception as e:
+                logging.error(f"Failed to parse JSON for {filename}: {e}")
                 pass
     return dataset
 
@@ -219,7 +241,7 @@ async def async_main():
                 v_batch_str = f"{v_batch:.2%}" if isinstance(v_batch, float) else str(v_batch)
                 print(f"{k:<25} | {v_seq_str:<20} | {v_batch_str:<20}")
     else:
-        _, analyst_report = await run_guardrail_scan_async(dataset, blue_team, is_simulation=is_sim, mode=args.mode)
+        _, analyst_report = await run_guardrail_scan_async(dataset, blue_team, is_simulation=is_sim, mode="async" if args.mode in ["sim", "ops"] else args.mode)
         if is_sim:
             print("\n--- Evaluation Metrics ---")
             for k, v in analyst_report["metadata"]["metrics"].items():
