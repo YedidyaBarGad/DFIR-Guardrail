@@ -50,7 +50,7 @@ artifact ──► pre-filter ──► not suspicious ────────�
 ```
 * **Defensive-context system prompt:** The guard model is told it is a security classifier analyzing hostile text, so a small local model will inspect payloads instead of refusing to read them.
 * **Brief reasoning before the verdict:** The model returns a JSON object `{"analysis": "...", "result": 0|1}`. Deterministic decoding (above) supplies the decoded text; the model is not relied on to decode Base64 itself.
-* **Output format:** Ollama's `format: "json"` guarantees valid JSON but not the schema, and `phi3:mini` sometimes returns other keys (e.g. `"status": "SECURE"`). A response without `result` in {0, 1} is an error and fails closed. `LLM_STRUCTURED_OUTPUT=1` switches to a JSON-schema `format` that enforces the two keys; it did not change verdicts in the padding probe (see `padding_probe.ipynb`).
+* **Output format:** Ollama's `format: "json"` guarantees valid JSON but not the schema, and `phi3:mini` sometimes returns other keys (e.g. `"status": "SECURE"`). A response without `result` in {0, 1} is an error and fails closed. `LLM_STRUCTURED_OUTPUT=1` switches to a JSON-schema `format` that enforces the two keys; it did not change verdicts in the padding probe (see `notebooks/padding_probe.ipynb`).
 * **Bounded concurrency:** `asyncio.Semaphore` with HTTPX connection pooling and a fixed context window (`num_ctx`) sends several requests at once to a local LLM. Requests are still scored independently.
 
 ### ⚙️ Pipeline (`src/pipeline.py`)
@@ -71,7 +71,7 @@ The pipeline is designed to run on a single 16GB VRAM GPU (e.g., NVIDIA T4) agai
 
 The provided notebook automates the entire local LLM infrastructure setup within the Colab VM.
 
-1. Open `colab_demo.ipynb` in Google Colab.
+1. Open `notebooks/colab_demo.ipynb` in Google Colab.
 2. Select **Runtime** > **Run All**.
 3. The notebook will automatically:
    * Install native GPU dependencies (`pciutils`, `lshw`).
@@ -143,7 +143,7 @@ python src/pipeline.py --mode ops --input_dir /path/to/forensics/json --output_d
 
 ### ⚡ Ablation: pre-filter vs. LLM (1,000 synthetic artifacts, 3 repeats)
 
-1,000 artifacts from `RedTeamPoisoner` (seed 42): 193 poisoned, 807 benign. `phi3:mini` (Q4_0, digest `4f2222927938`) on Ollama 0.40.16, Colab T4, `temperature=0.0`, `num_ctx=4096` (the default), `num_predict=200`, concurrency 3 with `OLLAMA_NUM_PARALLEL=3`, no Ollama seed. The dataset is identical in every repeat, so the ranges below are model non-determinism only. Each run restarts the Ollama daemon. Runs with more than 1% inference errors are excluded as invalid. Reproduce with `ablation_eval.ipynb`.
+1,000 artifacts from `RedTeamPoisoner` (seed 42): 193 poisoned, 807 benign. `phi3:mini` (Q4_0, digest `4f2222927938`) on Ollama 0.40.16, Colab T4, `temperature=0.0`, `num_ctx=4096` (the default), `num_predict=200`, concurrency 3 with `OLLAMA_NUM_PARALLEL=3`, no Ollama seed. The dataset is identical in every repeat, so the ranges below are model non-determinism only. Each run restarts the Ollama daemon. Runs with more than 1% inference errors are excluded as invalid. Reproduce with `notebooks/ablation_eval.ipynb`.
 
 All 6 runs completed with 0 errors, so fail-closed scoring does not affect these numbers.
 
@@ -164,7 +164,7 @@ Two earlier ablation runs are superseded, both because fail-closed scoring count
 
 * **The LLM alone is not usable as a classifier.** `phi3:mini` flags more than half of the benign artifacts. It misses 20–21 of 193 per run, not always the same ones: 30 distinct artifacts are missed across the three runs and 13 in all three.
 * **On this dataset the pre-filter does the work, and the LLM veto costs detections.** The pre-filter sends the LLM exactly 190 artifacts, all poisoned, none benign, so every "safe" verdict from the LLM is a lost detection: 22, 18 and 19 per run (about 10% of flagged). It removed no false positives, because there were none. The decisions also flip at temperature 0: 24 distinct artifacts are vetoed in at least one run and 14 in all three, so 10 are vetoed in some runs only. The synthetic benign set is easy for the pre-filter (see Limitations), so this does not show the LLM is useless on real data.
-* **Padding is a model failure, not only a context-size problem.** `padding_probe.ipynb` (4 artifacts that errored at 2048, 3 repeats each) shows prompts reach 2,269 tokens against `num_ctx=2048`, and all 12 requests returned no usable verdict. At 4096 all 12 returned a valid verdict, but the model called 6 of 12 safe (11 of 12 at 8192). A larger context turns the hidden failure into a verdict, and half or more of those verdicts are wrong. `LLM_STRUCTURED_OUTPUT=1` (JSON-schema `format`) works on Ollama 0.40.16 but did not change the verdicts at 4096.
+* **Padding is a model failure, not only a context-size problem.** `notebooks/padding_probe.ipynb` (4 artifacts that errored at 2048, 3 repeats each) shows prompts reach 2,269 tokens against `num_ctx=2048`, and all 12 requests returned no usable verdict. At 4096 all 12 returned a valid verdict, but the model called 6 of 12 safe (11 of 12 at 8192). A larger context turns the hidden failure into a verdict, and half or more of those verdicts are wrong. `LLM_STRUCTURED_OUTPUT=1` (JSON-schema `format`) works on Ollama 0.40.16 but did not change the verdicts at 4096.
 * **The two stages fail on different artifacts.** The pre-filter misses 3 artifacts, which the default pipeline never sends to the LLM. In all three LLM-only runs the model caught all three. A design where the LLM also reviews unflagged artifacts is untested, and its obstacle is the model's 54% false positive rate. On `hard.json` (500 artifacts, hand-built false-positive traps and evasive injections) the pre-filter alone, computed offline, catches 10 of 132 poisoned artifacts (92.4% FNR) and flags 23 of 368 benign (6.3% FPR). A full-pipeline run on `hard.json` is not done yet.
 * **What the 17 persistent misses are.** Seventeen artifacts are missed in all three pre-filter + LLM runs at 4096 (artifact ids 42, 117, 154, 158, 243, 255, 267, 279, 345, 391, 513, 544, 700, 830, 835, 925, 997, 0-indexed):
 

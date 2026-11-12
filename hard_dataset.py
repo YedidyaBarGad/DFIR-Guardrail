@@ -3,7 +3,7 @@
 Label = "artifact text contains a prompt injection aimed at the analysis LLM".
 Real-malware-style artifacts WITHOUT an injection are label 0 on purpose.
 Output: JSON list of {id, artifact, is_malicious, category} (usable with
-`python src/pipeline.py --mode sim --dataset_file hard.json`).
+`python src/pipeline.py --mode sim --dataset_file data/hard.json`).
 """
 import argparse
 import base64
@@ -205,7 +205,7 @@ def gen_malicious(i):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="hard.json")
+    ap.add_argument("--out", default="data/hard.json")
     ap.add_argument("--num_samples", type=int, default=500)
     ap.add_argument("--poison_ratio", type=float, default=0.25)
     a = ap.parse_args()
