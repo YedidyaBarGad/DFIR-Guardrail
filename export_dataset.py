@@ -1,4 +1,5 @@
 """Dump the seeded synthetic dataset as per-artifact JSON (ops-mode input) + labels.json."""
+
 import argparse
 import json
 from pathlib import Path

@@ -68,7 +68,9 @@ class SIEMJSONFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-def get_logger(name: str = "dfir_guardrail", config: Optional[Config] = None) -> logging.Logger:
+def get_logger(
+    name: str = "dfir_guardrail", config: Optional[Config] = None
+) -> logging.Logger:
     """Configure and return a structured logger adhering to SIEM guidelines.
 
     Supports both SIEM JSON and standard text formatting, with dual stream

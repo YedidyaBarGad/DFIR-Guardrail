@@ -83,7 +83,11 @@ class CSVStreamingParser(BaseForensicParser):
             self.errors.append(str(e))
             logger.error(
                 f"Error parsing CSV file {filepath}: {e}",
-                extra={"event_type": "csv_parse_error", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "csv_parse_error",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )
         finally:
             if f and not f.closed:

@@ -169,7 +169,9 @@ class ECSNormalizer:
         ecs_record: Dict[str, Any] = {}
         custom_fields: Dict[str, Any] = {}
         labels_fields: Dict[str, Any] = (
-            dict(raw_record.get("labels", {})) if isinstance(raw_record.get("labels"), dict) else {}
+            dict(raw_record.get("labels", {}))
+            if isinstance(raw_record.get("labels"), dict)
+            else {}
         )
 
         # Retain pre-existing custom fields if already structured
@@ -268,7 +270,10 @@ class ECSNormalizer:
         if "process" in ecs_record and isinstance(ecs_record["process"], dict):
             proc = ecs_record["process"]
             if "command_line" in proc and "process.command_line" not in extracted:
-                if isinstance(proc["command_line"], str) and proc["command_line"].strip():
+                if (
+                    isinstance(proc["command_line"], str)
+                    and proc["command_line"].strip()
+                ):
                     extracted["process.command_line"] = proc["command_line"].strip()
             if "executable" in proc and "process.executable" not in extracted:
                 if isinstance(proc["executable"], str) and proc["executable"].strip():
@@ -278,12 +283,28 @@ class ECSNormalizer:
                     extracted["process.name"] = proc["name"].strip()
             if "parent" in proc and isinstance(proc["parent"], dict):
                 parent = proc["parent"]
-                if "command_line" in parent and "process.parent.command_line" not in extracted:
-                    if isinstance(parent["command_line"], str) and parent["command_line"].strip():
-                        extracted["process.parent.command_line"] = parent["command_line"].strip()
-                if "executable" in parent and "process.parent.executable" not in extracted:
-                    if isinstance(parent["executable"], str) and parent["executable"].strip():
-                        extracted["process.parent.executable"] = parent["executable"].strip()
+                if (
+                    "command_line" in parent
+                    and "process.parent.command_line" not in extracted
+                ):
+                    if (
+                        isinstance(parent["command_line"], str)
+                        and parent["command_line"].strip()
+                    ):
+                        extracted["process.parent.command_line"] = parent[
+                            "command_line"
+                        ].strip()
+                if (
+                    "executable" in parent
+                    and "process.parent.executable" not in extracted
+                ):
+                    if (
+                        isinstance(parent["executable"], str)
+                        and parent["executable"].strip()
+                    ):
+                        extracted["process.parent.executable"] = parent[
+                            "executable"
+                        ].strip()
 
         if "file" in ecs_record and isinstance(ecs_record["file"], dict):
             f_dict = ecs_record["file"]
@@ -301,7 +322,14 @@ class ECSNormalizer:
         # 3. Check custom payload fields for high-risk keys (e.g. script_block, payload)
         custom = ecs_record.get("custom")
         if isinstance(custom, dict):
-            high_risk_custom_keywords = ("command", "payload", "script", "arguments", "powershell", "macro")
+            high_risk_custom_keywords = (
+                "command",
+                "payload",
+                "script",
+                "arguments",
+                "powershell",
+                "macro",
+            )
             for k, v in custom.items():
                 if isinstance(v, str) and v.strip():
                     lower_k = k.lower()

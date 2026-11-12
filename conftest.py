@@ -7,6 +7,7 @@ Provides:
 - A global autouse session fixture to prevent any accidental outbound connections
   during CI / sandboxed execution.
 """
+
 import pytest
 
 

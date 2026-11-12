@@ -6,6 +6,7 @@ so that the suite executes deterministically without network I/O or model
 loading overhead.  The conftest.py session fixture additionally forces
 _CAN_REACH_HUB=False at the session level.
 """
+
 import pytest
 
 from src.blue_team import BlueTeamGuardrail
@@ -81,9 +82,7 @@ async def test_anthropic_backend_request_and_fenced_json_parse():
 
     from src.config import get_settings
 
-    cfg = replace(
-        get_settings(), llm_backend="anthropic", anthropic_api_key="test-key"
-    )
+    cfg = replace(get_settings(), llm_backend="anthropic", anthropic_api_key="test-key")
     bt = BlueTeamGuardrail(
         model_name="claude-haiku-5-5", config=cfg, enable_semantic_search=False
     )
@@ -113,11 +112,15 @@ async def test_pipeline_dataset_file_is_scored(tmp_path, monkeypatch):
     f.write_text(json.dumps(ds))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        sys, "argv", ["p", "--mode", "sim", "--dataset_file", str(f), "--output_dir", str(tmp_path)]
+        sys,
+        "argv",
+        ["p", "--mode", "sim", "--dataset_file", str(f), "--output_dir", str(tmp_path)],
     )
     verdicts = iter([1, 0])
     with patch.object(BlueTeamGuardrail, "warmup", new=AsyncMock()), patch.object(
-        BlueTeamGuardrail, "classify_artifact", new=AsyncMock(side_effect=lambda *a: next(verdicts))
+        BlueTeamGuardrail,
+        "classify_artifact",
+        new=AsyncMock(side_effect=lambda *a: next(verdicts)),
     ):
         assert await pipeline.async_main() == 0
     report = json.loads((tmp_path / "guardrail_simulation.json").read_text())

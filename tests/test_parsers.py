@@ -16,10 +16,10 @@ from src.parsers.json_parser import JSONStreamingParser
 from src.parsers.xml_parser import XMLStreamingParser
 from src.pipeline import extract_high_risk_fields, load_real_data
 
-
 # ============================================================================
 # 1. ECS Normalizer Tests
 # ============================================================================
+
 
 def test_ecs_normalizer_field_mapping():
     """Verify that disparate forensic fields map correctly to standard ECS keys."""
@@ -45,7 +45,10 @@ def test_ecs_normalizer_field_mapping():
 
     # Dotted standard keys
     assert ecs["process.command_line"] == "powershell.exe -NoP -enc SQBYAEUAWA=="
-    assert ecs["process.executable"] == "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    assert (
+        ecs["process.executable"]
+        == "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    )
     assert ecs["process.name"] == "PowerShell.EXE"
     assert ecs["process.parent.command_line"] == "cmd.exe /c start_script.bat"
     assert ecs["process.parent.executable"] == "C:\\Windows\\System32\\cmd.exe"
@@ -58,7 +61,9 @@ def test_ecs_normalizer_field_mapping():
 
     # Nested structures for interoperability
     assert ecs["process"]["command_line"] == ecs["process.command_line"]
-    assert ecs["process"]["parent"]["command_line"] == ecs["process.parent.command_line"]
+    assert (
+        ecs["process"]["parent"]["command_line"] == ecs["process.parent.command_line"]
+    )
     assert ecs["file"]["path"] == ecs["file.path"]
     assert ecs["user"]["name"] == ecs["user.name"]
     assert ecs["host"]["name"] == ecs["host.name"]
@@ -98,7 +103,7 @@ def test_ecs_normalizer_extract_high_risk():
         "process.executable": "C:\\Windows\\System32\\powershell.exe",
         "file.description": "PowerShell",
         "host.name": "DESKTOP-999",  # Low risk: Should NOT be in high risk inspectable output
-        "user.name": "Alice",        # Low risk
+        "user.name": "Alice",  # Low risk
         "custom": {
             "payload_data": "base64EncodedInjectionPayload",
             "timestamp": "2026-10-25T00:00:00Z",
@@ -119,6 +124,7 @@ def test_ecs_normalizer_extract_high_risk():
 # ============================================================================
 # 2. JSON & JSONL Streaming Parser Tests
 # ============================================================================
+
 
 def test_json_streaming_parser_array(tmp_path):
     """Verify JSONStreamingParser handles streaming top-level JSON arrays."""
@@ -178,6 +184,7 @@ def test_json_streaming_parser_single_object(tmp_path):
 # 3. CSV Streaming Parser Tests
 # ============================================================================
 
+
 def test_csv_streaming_parser(tmp_path):
     """Verify CSVStreamingParser parses standard and BOM UTF-8 forensic CSV dumps."""
     file_path = str(tmp_path / "kape_output.csv")
@@ -201,6 +208,7 @@ def test_csv_streaming_parser(tmp_path):
 # ============================================================================
 # 4. XML Streaming Parser Tests
 # ============================================================================
+
 
 def test_xml_streaming_parser_windows_events(tmp_path):
     """Verify XMLStreamingParser streams Windows Event XML using iterparse."""
@@ -249,6 +257,7 @@ def test_xml_streaming_parser_windows_events(tmp_path):
 # 5. EVTX Parser Tests
 # ============================================================================
 
+
 def test_evtx_streaming_parser_binary_fallback(tmp_path):
     """Verify EVTXStreamingParser correctly parses binary EVTX chunk structures."""
     file_path = str(tmp_path / "Security.evtx")
@@ -265,7 +274,12 @@ def test_evtx_streaming_parser_binary_fallback(tmp_path):
     rec_len = 24 + len(rec_body)
     rec_id = 101
 
-    rec_header = record_magic + struct.pack("<I", rec_len) + struct.pack("<Q", rec_id) + struct.pack("<Q", 0)
+    rec_header = (
+        record_magic
+        + struct.pack("<I", rec_len)
+        + struct.pack("<Q", rec_id)
+        + struct.pack("<Q", 0)
+    )
     record_bytes = rec_header + rec_body
 
     chunk = b"ElfChnk\x00" + b"\x00" * 504 + record_bytes
@@ -278,7 +292,11 @@ def test_evtx_streaming_parser_binary_fallback(tmp_path):
     parsed = list(parser.parse(file_path))
 
     assert len(parsed) >= 1
-    assert any("powershell.exe" in p.get("process.command_line", "") or "powershell.exe" in p.get("event.original", "") for p in parsed)
+    assert any(
+        "powershell.exe" in p.get("process.command_line", "")
+        or "powershell.exe" in p.get("event.original", "")
+        for p in parsed
+    )
 
 
 def test_evtx_streaming_parser_xml_fallback(tmp_path):
@@ -304,6 +322,7 @@ def test_evtx_streaming_parser_xml_fallback(tmp_path):
 # ============================================================================
 # 6. ParserFactory & Format Detection Tests
 # ============================================================================
+
 
 def test_parser_factory_detection(tmp_path):
     """Verify ParserFactory detects format by extension and magic bytes."""
@@ -342,6 +361,7 @@ def test_parser_factory_detection(tmp_path):
 # 7. Unified Ingestion & Directory Traversal Tests
 # ============================================================================
 
+
 def test_load_forensic_data_mixed_directory(tmp_path):
     """Verify load_forensic_data recursively parses mixed multi-format files in a directory."""
     # Create JSON file
@@ -357,7 +377,9 @@ def test_load_forensic_data_mixed_directory(tmp_path):
     # Create XML file
     f_xml = str(tmp_path / "f3.xml")
     with open(f_xml, "w", encoding="utf-8") as f:
-        f.write("<Events><Event><EventData><Data Name=\"CommandLine\">ipconfig /all</Data></EventData></Event></Events>")
+        f.write(
+            '<Events><Event><EventData><Data Name="CommandLine">ipconfig /all</Data></EventData></Event></Events>'
+        )
 
     items = list(load_forensic_data(str(tmp_path)))
 
@@ -377,6 +399,7 @@ def test_load_forensic_data_mixed_directory(tmp_path):
 # ============================================================================
 # 8. Memory Limit & Size Guard Tests
 # ============================================================================
+
 
 def test_max_file_size_limit_skipped(tmp_path, caplog):
     """Verify parser rejects oversized files to protect against memory exhaustion."""
@@ -408,6 +431,7 @@ def test_max_file_size_limit_skipped(tmp_path, caplog):
 # 9. Pipeline Compatibility Tests
 # ============================================================================
 
+
 def test_pipeline_integration(tmp_path):
     """Verify pipeline functions load_real_data and extract_high_risk_fields work seamlessly."""
     test_file = str(tmp_path / "pipeline_test.json")
@@ -420,12 +444,18 @@ def test_pipeline_integration(tmp_path):
     # Test load_real_data with directory
     dataset = load_real_data(str(tmp_path))
     assert len(dataset) == 1
-    assert dataset[0]["content"]["process.command_line"] == "powershell.exe -enc TestPayload"
+    assert (
+        dataset[0]["content"]["process.command_line"]
+        == "powershell.exe -enc TestPayload"
+    )
 
     # Test load_real_data with single file
     single_dataset = load_real_data(test_file)
     assert len(single_dataset) == 1
-    assert single_dataset[0]["content"]["process.command_line"] == "powershell.exe -enc TestPayload"
+    assert (
+        single_dataset[0]["content"]["process.command_line"]
+        == "powershell.exe -enc TestPayload"
+    )
 
     # Test extract_high_risk_fields
     raw = {"CommandLine": "whoami /priv", "IgnoreMe": "hello"}

@@ -89,14 +89,9 @@ class RedTeamPoisoner:
 
         if chosen_technique == "decoy_logs":
             num_logs = self.rng.randint(25, 40)
-            logs = [
-                self.rng.choice(self._decoy_log_templates)
-                for _ in range(num_logs)
-            ]
+            logs = [self.rng.choice(self._decoy_log_templates) for _ in range(num_logs)]
             inject_idx = self.rng.randint(len(logs) // 2, len(logs) - 2)
-            logs.insert(
-                inject_idx, f"EVENT_RECORD_EMBED: {malicious_instruction}"
-            )
+            logs.insert(inject_idx, f"EVENT_RECORD_EMBED: {malicious_instruction}")
             return "\n".join(logs)
 
         elif chosen_technique == "token_stuffing":
@@ -183,9 +178,7 @@ class RedTeamPoisoner:
             return zero_width_space.join(payload)
 
         elif technique == "cognitive_load":
-            return self.generate_cognitive_load_payload(
-                malicious_instruction=payload
-            )
+            return self.generate_cognitive_load_payload(malicious_instruction=payload)
 
         elif technique == "roleplay_wrapper":
             roleplay_base = self.rng.choice(self.roleplay_payloads)

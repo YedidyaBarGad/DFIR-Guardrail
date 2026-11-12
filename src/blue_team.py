@@ -36,6 +36,7 @@ def _check_sentence_transformers() -> bool:
             SENTENCE_TRANSFORMERS_AVAILABLE = False
     return bool(SENTENCE_TRANSFORMERS_AVAILABLE)
 
+
 _CACHED_EMBEDDER: Any = None
 _CACHED_KNOWN_INJECTIONS: Any = None
 _CAN_REACH_HUB: Optional[bool] = None
@@ -111,7 +112,9 @@ def _strip_invisible(s: str) -> str:
         return s
     if _INVISIBLE_RE is None:  # built once; a per-char Python loop costs ~1s per MB
         cf = "".join(
-            chr(i) for i in range(sys.maxunicode + 1) if unicodedata.category(chr(i)) == "Cf"
+            chr(i)
+            for i in range(sys.maxunicode + 1)
+            if unicodedata.category(chr(i)) == "Cf"
         )
         _INVISIBLE_RE = re.compile("[" + re.escape(cf) + "]")
     return _INVISIBLE_RE.sub("", s)
@@ -289,14 +292,18 @@ class BlueTeamGuardrail:
         self.model_name = model_name or self.config.llm_model
         concurrency = max(
             1,
-            max_concurrent_requests
-            if max_concurrent_requests is not None
-            else self.config.concurrency_limit,
+            (
+                max_concurrent_requests
+                if max_concurrent_requests is not None
+                else self.config.concurrency_limit
+            ),
         )
         self.concurrency = concurrency
         self.semaphore = asyncio.Semaphore(concurrency)
         self.active_requests = 0
-        self.skip_prefilter = False  # True = every artifact goes to the LLM (model-only evaluation)
+        self.skip_prefilter = (
+            False  # True = every artifact goes to the LLM (model-only evaluation)
+        )
 
         # Resilience: Circuit Breaker pattern state
         self.consecutive_timeouts = 0
@@ -309,9 +316,7 @@ class BlueTeamGuardrail:
             max_connections=concurrency * 2,
             max_keepalive_connections=concurrency,
         )
-        self.client = httpx.AsyncClient(
-            timeout=self.config.llm_timeout, limits=limits
-        )
+        self.client = httpx.AsyncClient(timeout=self.config.llm_timeout, limits=limits)
 
         # Detection Engineering: Semantic Intent Pre-Filtering with Resilient Caching & Offline Fallback
         self.embedder = None
@@ -447,7 +452,9 @@ class BlueTeamGuardrail:
                 c in "0123456789abcdefABCDEF" for c in clean_token
             ):
                 try:
-                    h_decoded = bytes.fromhex(clean_token).decode("utf-8", errors="strict")
+                    h_decoded = bytes.fromhex(clean_token).decode(
+                        "utf-8", errors="strict"
+                    )
                     if self._printable(h_decoded):
                         decoded_payloads.append(h_decoded)
                 except Exception:
@@ -461,7 +468,10 @@ class BlueTeamGuardrail:
 
                 emb = self.embedder.encode(analyzable_text)
                 similarities = cos_sim(emb, self.known_injections)
-                return similarities.max().item() > self.config.semantic_similarity_threshold
+                return (
+                    similarities.max().item()
+                    > self.config.semantic_similarity_threshold
+                )
             except Exception:
                 return False
         # Robust heuristic fallback for offline or air-gapped deployments
@@ -502,7 +512,9 @@ class BlueTeamGuardrail:
         if len(collapsed_text) <= 1500:
             return collapsed_text
         head, tail = collapsed_text[:750], collapsed_text[-750:]
-        middle_entropy = [t for t in high_entropy_tokens if t not in head and t not in tail]
+        middle_entropy = [
+            t for t in high_entropy_tokens if t not in head and t not in tail
+        ]
         marker = (
             f"\n...[PRESERVED_HIGH_ENTROPY: {' '.join(middle_entropy[:5])}]...\n"
             if middle_entropy
@@ -511,11 +523,15 @@ class BlueTeamGuardrail:
         # Keep context around rule matches that fall in the cut-out middle, so the
         # model can see why the pre-filter flagged this value.
         middle_start = 750
-        middle_end = min(len(collapsed_text) - 750, middle_start + 200_000)  # bound regex CPU
+        middle_end = min(
+            len(collapsed_text) - 750, middle_start + 200_000
+        )  # bound regex CPU
         snippets = []
         for rx in (ROLEPLAY_REGEX, HEURISTIC_REGEX):
             for m in rx.finditer(collapsed_text, middle_start, middle_end):
-                lo, hi = max(m.start() - 200, middle_start), min(m.end() + 200, middle_end)
+                lo, hi = max(m.start() - 200, middle_start), min(
+                    m.end() + 200, middle_end
+                )
                 snippets.append(collapsed_text[lo:hi])
                 if len(snippets) >= 3:
                     break

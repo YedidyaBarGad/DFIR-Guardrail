@@ -38,7 +38,9 @@ class Config:
     llm_model: str = "phi3:mini"
     llm_timeout: float = 15.0
     llm_num_ctx: int = 4096  # 2048 truncated or corrupted padded prompts (see README)
-    llm_structured_output: bool = False  # Ollama JSON-schema constrained decoding instead of free-form JSON
+    llm_structured_output: bool = (
+        False  # Ollama JSON-schema constrained decoding instead of free-form JSON
+    )
     llm_backend: str = "ollama"  # "ollama" | "anthropic"
     anthropic_api_key: str = ""  # env only; never logged
     concurrency_limit: int = 3

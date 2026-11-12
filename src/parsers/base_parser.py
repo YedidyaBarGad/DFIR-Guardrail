@@ -37,7 +37,11 @@ class BaseForensicParser(ABC):
         except OSError as e:
             logger.error(
                 f"Failed to access file {filepath}: {e}",
-                extra={"event_type": "file_access_error", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "file_access_error",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )
             return False
 

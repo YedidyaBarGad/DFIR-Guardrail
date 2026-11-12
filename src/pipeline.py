@@ -111,7 +111,9 @@ async def analyze_single(
 
     is_threat = predicted_class == 1 or predicted_class == -1
     scan_status = (
-        "threat" if predicted_class == 1 else ("error" if predicted_class == -1 else "benign")
+        "threat"
+        if predicted_class == 1
+        else ("error" if predicted_class == -1 else "benign")
     )
     record_artifact_scanned(source=source_file, status=scan_status)
 
@@ -154,7 +156,9 @@ async def analyze_single(
     if is_threat:
         report_entry["suspicious_content"] = content
         if predicted_class == -1:
-            report_entry["error_detail"] = "Failed to analyze. Flagged under fail-closed."
+            report_entry["error_detail"] = (
+                "Failed to analyze. Flagged under fail-closed."
+            )
 
     return result, report_entry, is_threat
 
@@ -185,7 +189,11 @@ async def run_guardrail_scan_async(
     start_time = time.time()
     logger.info(
         f"========== STARTING SCAN: MODE={mode.upper()} ==========",
-        extra={"event_type": "scan_start", "mode": mode, "is_simulation": is_simulation},
+        extra={
+            "event_type": "scan_start",
+            "mode": mode,
+            "is_simulation": is_simulation,
+        },
     )
 
     window = 1 if mode != "async" else max(1, blue_team.concurrency) * 4
@@ -206,7 +214,9 @@ async def run_guardrail_scan_async(
     try:
         for idx, item in enumerate(dataset):
             pending.add(
-                asyncio.ensure_future(analyze_single(idx, item, blue_team, is_simulation))
+                asyncio.ensure_future(
+                    analyze_single(idx, item, blue_team, is_simulation)
+                )
             )
             if len(pending) >= window:
                 done, pending = await asyncio.wait(
@@ -239,7 +249,9 @@ async def run_guardrail_scan_async(
             "threats_detected": metadata["threats_detected"],
         },
     )
-    print(f"\nScan completed in {elapsed:.2f} seconds. Throughput: {throughput:.2f} items/sec.")
+    print(
+        f"\nScan completed in {elapsed:.2f} seconds. Throughput: {throughput:.2f} items/sec."
+    )
 
     if is_simulation:
         metadata["metrics"] = compute_metrics(results)
@@ -251,8 +263,10 @@ def warn_if_backend_failed(metrics: Dict[str, Any]) -> None:
     """Fail-closed counts errors as flagged, so a dead backend would otherwise look like detections."""
     total, errs = metrics.get("Total processed", 0), metrics.get("Errors", 0)
     if total and errs > 0.01 * total:
-        print(f"WARNING: {errs}/{total} inference errors. These were scored as flagged, so the "
-              "metrics above reflect the pre-filter/timeouts, not the model. Do not cite them.")
+        print(
+            f"WARNING: {errs}/{total} inference errors. These were scored as flagged, so the "
+            "metrics above reflect the pre-filter/timeouts, not the model. Do not cite them."
+        )
 
 
 def print_run_config(blue_team: BlueTeamGuardrail, concurrency: int) -> None:
@@ -262,7 +276,9 @@ def print_run_config(blue_team: BlueTeamGuardrail, concurrency: int) -> None:
     host, model = blue_team.ollama_host, blue_team.model_name
     version = digest = "unknown"
     try:
-        version = httpx.get(f"{host}/api/version", timeout=5).json().get("version", version)
+        version = (
+            httpx.get(f"{host}/api/version", timeout=5).json().get("version", version)
+        )
         for m in httpx.get(f"{host}/api/tags", timeout=5).json().get("models", []):
             if m.get("name") == model:
                 digest = f"{m.get('digest', '')[:12]} {m.get('details', {}).get('quantization_level', '')}"
@@ -271,11 +287,15 @@ def print_run_config(blue_team: BlueTeamGuardrail, concurrency: int) -> None:
     print("--- Run configuration ---")
     print(f"model={model} digest/quant={digest} ollama={version}")
     cfg = blue_team.config
-    print(f"options: temperature=0.0 num_ctx={cfg.llm_num_ctx} num_predict=200 (no seed) "
-          f"structured_output={'on' if cfg.llm_structured_output else 'off'}")
-    print(f"prefilter={'off' if blue_team.skip_prefilter else 'on'} "
-          f"embedder={'on' if blue_team.embedder is not None else 'off'} "
-          f"concurrency={concurrency} (set OLLAMA_NUM_PARALLEL on the daemon to match)")
+    print(
+        f"options: temperature=0.0 num_ctx={cfg.llm_num_ctx} num_predict=200 (no seed) "
+        f"structured_output={'on' if cfg.llm_structured_output else 'off'}"
+    )
+    print(
+        f"prefilter={'off' if blue_team.skip_prefilter else 'on'} "
+        f"embedder={'on' if blue_team.embedder is not None else 'off'} "
+        f"concurrency={concurrency} (set OLLAMA_NUM_PARALLEL on the daemon to match)"
+    )
 
 
 async def async_main() -> int:
@@ -403,9 +423,7 @@ async def async_main() -> int:
         seq_t = report_seq["metadata"]["scan_time_seconds"]
         async_t = analyst_report["metadata"]["scan_time_seconds"]
 
-        print(
-            f"{'Metric':<25} | {'Sequential Baseline':<20} | {'Async (bounded)':<20}"
-        )
+        print(f"{'Metric':<25} | {'Sequential Baseline':<20} | {'Async (bounded)':<20}")
         print("-" * 71)
         print(f"{'Scan Time':<25} | {seq_t:<19.2f}s | {async_t:<19.2f}s")
         if async_t > 0:

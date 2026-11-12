@@ -14,7 +14,9 @@ def _write(tmp_path, name, text):
 
 
 def test_float_fields_survive_report_dump(tmp_path):
-    recs = load_real_data(_write(tmp_path, "a.json", '[{"CommandLine":"x","Score":1.5}]'))
+    recs = load_real_data(
+        _write(tmp_path, "a.json", '[{"CommandLine":"x","Score":1.5}]')
+    )
     json.dumps(recs[0]["ecs"])  # raises on Decimal
 
 

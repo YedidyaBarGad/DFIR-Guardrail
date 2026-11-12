@@ -129,7 +129,9 @@ class XMLStreamingParser(BaseForensicParser):
                     clean_tag = _strip_ns(elem.tag).lower()
 
                     # Yield if element is a known forensic record or a direct child of the root container
-                    is_record = clean_tag in known_record_tags or (depth == 1 and root is not None and elem is not root)
+                    is_record = clean_tag in known_record_tags or (
+                        depth == 1 and root is not None and elem is not root
+                    )
 
                     if is_record:
                         record_dict = _element_to_dict(elem)
@@ -156,5 +158,9 @@ class XMLStreamingParser(BaseForensicParser):
             self.errors.append(str(e))
             logger.error(
                 f"Error parsing XML file {filepath}: {e}",
-                extra={"event_type": "xml_parse_error", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "xml_parse_error",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )

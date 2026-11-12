@@ -17,10 +17,12 @@ logger = get_logger("dfir_guardrail.parsers.evtx")
 EVTX_MODULE = None
 try:
     import Evtx.Evtx as EvtxModule
+
     EVTX_MODULE = EvtxModule
 except ImportError:
     try:
         import evtx as EvtxModule
+
         EVTX_MODULE = EvtxModule
     except ImportError:
         EVTX_MODULE = None
@@ -50,13 +52,20 @@ class EVTXStreamingParser(BaseForensicParser):
                     except Exception as rec_err:
                         logger.warning(
                             f"Skipping malformed EVTX record in {filepath}: {rec_err}",
-                            extra={"event_type": "evtx_record_error", "filepath": filepath},
+                            extra={
+                                "event_type": "evtx_record_error",
+                                "filepath": filepath,
+                            },
                         )
         except Exception as e:
             self.errors.append(str(e))
             logger.error(
                 f"Error in python-evtx library parser for {filepath}: {e}",
-                extra={"event_type": "evtx_library_error", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "evtx_library_error",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )
 
     def _extract_xml_from_bytes(self, data: bytes) -> Iterator[Dict[str, Any]]:
@@ -94,7 +103,10 @@ class EVTXStreamingParser(BaseForensicParser):
                 if not header.startswith(self.EVTX_MAGIC):
                     logger.warning(
                         f"EVTX header magic missing in {filepath}, proceeding with payload scanning",
-                        extra={"event_type": "evtx_magic_missing", "filepath": filepath},
+                        extra={
+                            "event_type": "evtx_magic_missing",
+                            "filepath": filepath,
+                        },
                     )
 
                 chunk_idx = 0
@@ -131,15 +143,21 @@ class EVTXStreamingParser(BaseForensicParser):
                             # 8..16: Record ID (uint64)
                             # 16..24: Timestamp (FILETIME uint64)
                             if pos + 24 <= len(chunk_data):
-                                rec_len = struct.unpack_from("<I", chunk_data, pos + 4)[0]
-                                rec_id = struct.unpack_from("<Q", chunk_data, pos + 8)[0]
+                                rec_len = struct.unpack_from("<I", chunk_data, pos + 4)[
+                                    0
+                                ]
+                                rec_id = struct.unpack_from("<Q", chunk_data, pos + 8)[
+                                    0
+                                ]
 
                                 if 24 <= rec_len <= len(chunk_data) - pos:
                                     rec_body = chunk_data[pos + 24 : pos + rec_len]
                                     # Extract ASCII and UTF-16 strings from the record
                                     strings_ascii = [
                                         s.decode("ascii")
-                                        for s in re.findall(rb"[\x20-\x7e]{4,}", rec_body)
+                                        for s in re.findall(
+                                            rb"[\x20-\x7e]{4,}", rec_body
+                                        )
                                     ]
                                     strings_utf16 = [
                                         s.decode("utf-16le")
@@ -158,11 +176,18 @@ class EVTXStreamingParser(BaseForensicParser):
                                     for s in all_strings:
                                         s_low = s.lower()
                                         if s.endswith(".exe") or ".exe " in s_low:
-                                            if "process.command_line" not in record_dict:
+                                            if (
+                                                "process.command_line"
+                                                not in record_dict
+                                            ):
                                                 record_dict["process.command_line"] = s
-                                            elif "process.executable" not in record_dict:
+                                            elif (
+                                                "process.executable" not in record_dict
+                                            ):
                                                 record_dict["process.executable"] = s
-                                        elif "\\" in s and (":" in s or s.startswith("\\")):
+                                        elif "\\" in s and (
+                                            ":" in s or s.startswith("\\")
+                                        ):
                                             if "file.path" not in record_dict:
                                                 record_dict["file.path"] = s
 
@@ -188,7 +213,11 @@ class EVTXStreamingParser(BaseForensicParser):
             self.errors.append(str(e))
             logger.error(
                 f"Error in fallback EVTX parsing for {filepath}: {e}",
-                extra={"event_type": "evtx_fallback_error", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "evtx_fallback_error",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )
 
     def parse(self, filepath: str) -> Iterator[Dict[str, Any]]:
@@ -204,7 +233,9 @@ class EVTXStreamingParser(BaseForensicParser):
         try:
             with open(filepath, "rb") as f:
                 prefix = f.read(512).strip()
-                if prefix.startswith((b"<?xml", b"<Events", b"<Event", b"<\x00?\x00x\x00m\x00l")):
+                if prefix.startswith(
+                    (b"<?xml", b"<Events", b"<Event", b"<\x00?\x00x\x00m\x00l")
+                ):
                     xml_parser = XMLStreamingParser(self.config)
                     yield from xml_parser.parse(filepath)
                     return

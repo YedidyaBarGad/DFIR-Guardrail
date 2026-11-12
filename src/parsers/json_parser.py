@@ -150,12 +150,19 @@ class JSONStreamingParser(BaseForensicParser):
                 else:
                     logger.warning(
                         f"Unexpected root JSON structure in {filepath}: {first_event}",
-                        extra={"event_type": "json_unexpected_root", "filepath": filepath},
+                        extra={
+                            "event_type": "json_unexpected_root",
+                            "filepath": filepath,
+                        },
                     )
         except Exception as e:
             # Fallback to line-by-line reading if ijson encountered an unexpected stream boundary
             logger.warning(
                 f"ijson stream failed for {filepath}, attempting JSONL fallback: {e}",
-                extra={"event_type": "json_ijson_fallback", "filepath": filepath, "error": str(e)},
+                extra={
+                    "event_type": "json_ijson_fallback",
+                    "filepath": filepath,
+                    "error": str(e),
+                },
             )
             yield from self._parse_jsonl(filepath)

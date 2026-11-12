@@ -33,7 +33,9 @@ class ParserFactory:
 
                 # XML magic
                 clean_header = header.lstrip()
-                if clean_header.startswith((b"<?xml", b"<Events", b"<Event", b"<\x00?\x00x\x00m\x00l")):
+                if clean_header.startswith(
+                    (b"<?xml", b"<Events", b"<Event", b"<\x00?\x00x\x00m\x00l")
+                ):
                     return "xml"
 
                 # JSON magic
@@ -134,7 +136,13 @@ def load_forensic_data(
                 f"Skipping unsupported file {filepath}: {err}",
                 extra={"event_type": "unsupported_file_skipped", "filepath": filepath},
             )
-            skipped.append({"filepath": filepath, "reason": "unsupported_format", "detail": str(err)})
+            skipped.append(
+                {
+                    "filepath": filepath,
+                    "reason": "unsupported_format",
+                    "detail": str(err),
+                }
+            )
             continue
 
         try:
@@ -142,7 +150,13 @@ def load_forensic_data(
         except OSError:
             too_big = False
         if too_big:
-            skipped.append({"filepath": filepath, "reason": "size_limit", "detail": f"over {cfg.max_file_size_mb}MB"})
+            skipped.append(
+                {
+                    "filepath": filepath,
+                    "reason": "size_limit",
+                    "detail": f"over {cfg.max_file_size_mb}MB",
+                }
+            )
             continue
 
         filename = os.path.basename(filepath)
@@ -160,9 +174,17 @@ def load_forensic_data(
 
             # Never drop a record unseen: injections hide in any field, so records
             # without a known high-risk field are scanned via their full original text.
-            content = high_risk_ecs if high_risk_ecs else {"event.original": str(ecs_record.get("event.original", ""))}
+            content = (
+                high_risk_ecs
+                if high_risk_ecs
+                else {"event.original": str(ecs_record.get("event.original", ""))}
+            )
 
-            record_id = raw_record.get("_record_id") or raw_record.get("_record_key") or record_idx
+            record_id = (
+                raw_record.get("_record_id")
+                or raw_record.get("_record_key")
+                or record_idx
+            )
             item = {
                 "id": f"{filename}_{record_id}",
                 "artifact_source": filename,
@@ -174,4 +196,6 @@ def load_forensic_data(
             yield item
 
         for err in parser.errors:
-            skipped.append({"filepath": filepath, "reason": "parse_error", "detail": err})
+            skipped.append(
+                {"filepath": filepath, "reason": "parse_error", "detail": err}
+            )
