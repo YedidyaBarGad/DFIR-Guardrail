@@ -1,23 +1,37 @@
-import time
 import argparse
-import os
-import json
 import asyncio
-import logging
-import ijson
+import json
+import os
+import time
+import sys
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from src.red_team import RedTeamPoisoner
 from src.blue_team import BlueTeamGuardrail
+from src.config import get_settings
+from src.logger import get_logger
+from src.metrics import (
+    record_artifact_scanned,
+    record_scan_duration,
+    record_threat_detected,
+    start_metrics_server,
+)
+from src.parsers.ecs_normalizer import ECSNormalizer
+from src.parsers.factory import load_forensic_data
+from src.red_team import RedTeamPoisoner
+
+logger = get_logger("dfir_guardrail.pipeline")
 
 
-def compute_metrics(results):
+def compute_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate DFIR detection performance metrics (FPR, FNR, TP, TN, FP, FN)."""
     TP = TN = FP = FN = ERR = 0
     for r in results:
         t = r.get("true_label", -1)
         p = r.get("predicted_label", -1)
         if p == -1:
+            # Fail-closed: an error counts as flagged, so a missed attack is not hidden
             ERR += 1
-            continue
+            p = 1
         if t == 1 and p == 1:
             TP += 1
         elif t == 0 and p == 0:
@@ -43,88 +57,27 @@ def compute_metrics(results):
     }
 
 
-def extract_high_risk_fields(item):
-    high_risk_keys = [
-        "CommandLine",
-        "FileDescription",
-        "ExecutablePath",
-        "ImagePath",
-        "Arguments",
-        "ParentCommandLine",
-        "PayloadData",
-        "Message",
-    ]
-    extracted_content = {}
-    for key, value in item.items():
-        if (
-            any(risk_key.lower() in key.lower() for risk_key in high_risk_keys)
-            and value
-        ):
-            extracted_content[key] = value
-    return extracted_content
+def extract_high_risk_fields(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract known high-risk execution and metadata fields normalized to Elastic Common Schema (ECS)."""
+    normalizer = ECSNormalizer()
+    ecs_record = normalizer.normalize(item)
+    return normalizer.extract_high_risk_ecs(ecs_record)
 
 
-def load_real_data(input_dir):
-    dataset = []
-    if not os.path.exists(input_dir):
-        return dataset
+def load_real_data(
+    input_path: str, skipped: Optional[List[Dict[str, str]]] = None
+) -> List[Dict[str, Any]]:
+    """Parse multi-format forensic artifacts from a file or directory into a list (small inputs, tests).
 
-    # OS File size limit to prevent Memory Exhaustion
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-
-    for filename in os.listdir(input_dir):
-        if filename.endswith(".json"):
-            filepath = os.path.join(input_dir, filename)
-
-            if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                logging.warning(
-                    f"File {filename} exceeds 50MB limit. Skipping to prevent memory exhaustion."
-                )
-                continue
-
-            try:
-                # Streaming JSON Parser (ijson) to prevent JSON bombs
-                with open(filepath, "rb") as f:
-                    # Detect if root is list or dict based on first token
-                    parser = ijson.parse(f)
-                    prefix, event, value = next(parser)
-
-                    # Reset file pointer
-                    f.seek(0)
-
-                    if event == "start_array":
-                        idx = 0
-                        for item in ijson.items(f, "item"):
-                            if isinstance(item, dict):
-                                relevant_text = extract_high_risk_fields(item)
-                                if relevant_text:
-                                    dataset.append(
-                                        {
-                                            "id": f"{filename}_{idx}",
-                                            "artifact_source": filename,
-                                            "content": relevant_text,
-                                        }
-                                    )
-                            idx += 1
-                    else:
-                        for key, value in ijson.kvitems(f, ""):
-                            if isinstance(value, dict):
-                                relevant_text = extract_high_risk_fields(value)
-                                if relevant_text:
-                                    dataset.append(
-                                        {
-                                            "id": f"{filename}_{key}",
-                                            "artifact_source": filename,
-                                            "content": relevant_text,
-                                        }
-                                    )
-            except Exception as e:
-                logging.error(f"Failed to parse JSON for {filename}: {e}")
-                pass
-    return dataset
+    Large inputs should iterate `load_forensic_data` directly so memory stays flat.
+    """
+    return list(load_forensic_data(input_path, skipped=skipped))
 
 
-async def analyze_single(idx, item, blue_team, is_simulation):
+async def analyze_single(
+    idx: int, item: dict, blue_team: BlueTeamGuardrail, is_simulation: bool
+) -> Tuple[Optional[dict], dict, bool]:
+    """Analyze a single artifact, update Prometheus metrics, and generate report findings."""
     if is_simulation:
         artifact = item["artifact"]
         artifact_id = f"sim_{idx}"
@@ -138,10 +91,15 @@ async def analyze_single(idx, item, blue_team, is_simulation):
         source_file = "simulation"
         content = artifact
     else:
+        # Send high-risk fields plus unmapped fields once; the full ECS record
+        # repeats every value 2-3x and overflows the model's context window.
         artifact_for_model = {
             "Source": item["artifact_source"],
             "Content": item["content"],
         }
+        custom = item.get("ecs", {}).get("custom")
+        if custom:
+            artifact_for_model["Custom"] = custom
         artifact_id = item["id"]
         predicted_class = await blue_team.classify_artifact(
             artifact_id, artifact_for_model
@@ -151,10 +109,36 @@ async def analyze_single(idx, item, blue_team, is_simulation):
         source_file = item["artifact_source"]
         content = item["content"]
 
+    is_threat = predicted_class == 1 or predicted_class == -1
+    scan_status = (
+        "threat" if predicted_class == 1 else ("error" if predicted_class == -1 else "benign")
+    )
+    record_artifact_scanned(source=source_file, status=scan_status)
+
     if predicted_class == 1:
         verdict = "Malicious (Prompt Injection Detected)"
+        record_threat_detected(threat_type="prompt_injection")
+        logger.warning(
+            f"Threat detected: Prompt injection in artifact {artifact_id}",
+            extra={
+                "event_type": "threat_detected",
+                "artifact_id": artifact_id,
+                "source": source_file,
+                "threat_type": "prompt_injection",
+            },
+        )
     elif predicted_class == -1:
         verdict = "Suspicious (Inference Error / Potential Bypass)"
+        record_threat_detected(threat_type="fail_closed_error")
+        logger.warning(
+            f"Threat flagged under fail-closed: Inference error in artifact {artifact_id}",
+            extra={
+                "event_type": "threat_detected",
+                "artifact_id": artifact_id,
+                "source": source_file,
+                "threat_type": "fail_closed_error",
+            },
+        )
     else:
         verdict = "Safe (Benign)"
 
@@ -162,84 +146,147 @@ async def analyze_single(idx, item, blue_team, is_simulation):
 
     if not is_simulation:
         report_entry["source_file"] = source_file
+        if "ecs" in item:
+            report_entry["ecs"] = item["ecs"]
     else:
         report_entry["ground_truth"] = "Malicious" if item["is_malicious"] else "Benign"
 
-    is_threat = predicted_class == 1 or predicted_class == -1
     if is_threat:
         report_entry["suspicious_content"] = content
         if predicted_class == -1:
-            report_entry["error_detail"] = (
-                "Failed to analyze. Flagged under fail-closed."
-            )
+            report_entry["error_detail"] = "Failed to analyze. Flagged under fail-closed."
 
     return result, report_entry, is_threat
 
 
 async def run_guardrail_scan_async(
-    dataset, blue_team, is_simulation=False, mode="async"
-):
-    import tqdm.asyncio
+    dataset: Iterable[dict],
+    blue_team: BlueTeamGuardrail,
+    is_simulation: bool = False,
+    mode: str = "async",
+) -> Tuple[List[dict], dict]:
+    """Scan an iterable of artifacts with a bounded window of in-flight tasks.
 
-    analyst_report = {
-        "metadata": {
-            "scan_time_seconds": 0,
-            "total_artifacts_scanned": len(dataset),
-            "threats_detected": 0,
-        },
-        "findings": [],
+    Memory stays flat for generators: only `window` items are alive at once. Simulation
+    reports keep every finding; ops reports keep threats only (benign items are counted).
+    """
+    from tqdm import tqdm
+
+    metadata = {
+        "scan_time_seconds": 0,
+        "total_artifacts_scanned": 0,
+        "threats_detected": 0,
     }
     if is_simulation:
-        analyst_report["metadata"]["metrics"] = {}
+        metadata["metrics"] = {}
+    analyst_report = {"metadata": metadata, "findings": []}
+    results: List[dict] = []
 
     start_time = time.time()
-    logging.info(f"========== STARTING SCAN: MODE={mode.upper()} ==========")
-
-    tasks = [
-        analyze_single(idx, item, blue_team, is_simulation)
-        for idx, item in enumerate(dataset)
-    ]
-
-    if mode == "async":
-        # Run concurrently and show progress bar
-        output = await tqdm.asyncio.tqdm.gather(
-            *tasks, desc="Scanning artifacts (Async Sequential)"
-        )
-    else:
-        # Run purely sequentially
-        import tqdm
-
-        output = []
-        for t in tqdm.tqdm(tasks, desc="Scanning artifacts (Pure Sequential)"):
-            output.append(await t)
-
-    results = []
-    for res, rep, is_threat in output:
-        if res:
-            results.append(res)
-        analyst_report["findings"].append(rep)
-        if is_threat:
-            analyst_report["metadata"]["threats_detected"] += 1
-
-    elapsed = time.time() - start_time
-    analyst_report["metadata"]["scan_time_seconds"] = round(elapsed, 2)
-    print(
-        f"\nScan completed in {elapsed:.2f} seconds. Throughput: {len(dataset)/elapsed:.2f} items/sec."
+    logger.info(
+        f"========== STARTING SCAN: MODE={mode.upper()} ==========",
+        extra={"event_type": "scan_start", "mode": mode, "is_simulation": is_simulation},
     )
 
+    window = 1 if mode != "async" else max(1, blue_team.concurrency) * 4
+    pending: set = set()
+    pbar = tqdm(desc=f"Scanning artifacts ({mode})", unit="item")
+
+    def handle(task: "asyncio.Future") -> None:
+        res, rep, is_threat = task.result()
+        metadata["total_artifacts_scanned"] += 1
+        if res:
+            results.append(res)
+        if is_threat:
+            metadata["threats_detected"] += 1
+        if is_simulation or is_threat:
+            analyst_report["findings"].append(rep)
+        pbar.update(1)
+
+    try:
+        for idx, item in enumerate(dataset):
+            pending.add(
+                asyncio.ensure_future(analyze_single(idx, item, blue_team, is_simulation))
+            )
+            if len(pending) >= window:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in done:
+                    handle(t)
+        if pending:
+            done, pending = await asyncio.wait(pending)
+            for t in done:
+                handle(t)
+    finally:
+        for t in pending:
+            t.cancel()
+        pbar.close()
+
+    analyst_report["findings"].sort(key=lambda f: f["id"])
+    total = metadata["total_artifacts_scanned"]
+    elapsed = time.time() - start_time
+    record_scan_duration(elapsed)
+    metadata["scan_time_seconds"] = round(elapsed, 2)
+    throughput = total / elapsed if elapsed > 0 else 0
+
+    logger.info(
+        f"Scan completed in {elapsed:.2f} seconds. Throughput: {throughput:.2f} items/sec.",
+        extra={
+            "event_type": "scan_complete",
+            "elapsed_seconds": round(elapsed, 4),
+            "total_artifacts": total,
+            "threats_detected": metadata["threats_detected"],
+        },
+    )
+    print(f"\nScan completed in {elapsed:.2f} seconds. Throughput: {throughput:.2f} items/sec.")
+
     if is_simulation:
-        metrics = compute_metrics(results)
-        analyst_report["metadata"]["metrics"] = metrics
+        metadata["metrics"] = compute_metrics(results)
 
     return results, analyst_report
 
 
-async def async_main():
+def warn_if_backend_failed(metrics: Dict[str, Any]) -> None:
+    """Fail-closed counts errors as flagged, so a dead backend would otherwise look like detections."""
+    total, errs = metrics.get("Total processed", 0), metrics.get("Errors", 0)
+    if total and errs > 0.01 * total:
+        print(f"WARNING: {errs}/{total} inference errors. These were scored as flagged, so the "
+              "metrics above reflect the pre-filter/timeouts, not the model. Do not cite them.")
+
+
+def print_run_config(blue_team: BlueTeamGuardrail, concurrency: int) -> None:
+    """Print what a benchmark actually ran with, so results can be cited and reproduced."""
+    import httpx
+
+    host, model = blue_team.ollama_host, blue_team.model_name
+    version = digest = "unknown"
+    try:
+        version = httpx.get(f"{host}/api/version", timeout=5).json().get("version", version)
+        for m in httpx.get(f"{host}/api/tags", timeout=5).json().get("models", []):
+            if m.get("name") == model:
+                digest = f"{m.get('digest', '')[:12]} {m.get('details', {}).get('quantization_level', '')}"
+    except Exception:
+        pass  # best effort; the scan itself does not depend on it
+    print("--- Run configuration ---")
+    print(f"model={model} digest/quant={digest} ollama={version}")
+    cfg = blue_team.config
+    print(f"options: temperature=0.0 num_ctx={cfg.llm_num_ctx} num_predict=200 (no seed) "
+          f"structured_output={'on' if cfg.llm_structured_output else 'off'}")
+    print(f"prefilter={'off' if blue_team.skip_prefilter else 'on'} "
+          f"embedder={'on' if blue_team.embedder is not None else 'off'} "
+          f"concurrency={concurrency} (set OLLAMA_NUM_PARALLEL on the daemon to match)")
+
+
+async def async_main() -> int:
+    """CLI entrypoint for DFIR-Guardrail pipeline."""
+    config = get_settings()
+
     parser = argparse.ArgumentParser(description="DFIR-Guardrail Pipeline")
     parser.add_argument(
         "--input_dir",
         type=str,
-        help="Path to parsed artifacts from KAPE or Velociraptor for analysis",
+        help="Path to parsed artifacts from KAPE, Velociraptor, or forensic logs (directory or single file: JSON, CSV, XML, EVTX) for analysis",
     )
     parser.add_argument(
         "--output_dir", type=str, help="Path to save the validation results"
@@ -266,24 +313,67 @@ async def async_main():
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=3,
-        help="Number of concurrent LLM requests to make in async mode (should match OLLAMA_NUM_PARALLEL).",
+        default=config.concurrency_limit,
+        help="Number of concurrent LLM requests to make in async mode.",
+    )
+    parser.add_argument(
+        "--dataset_file",
+        type=str,
+        help="Sim mode: JSON list of {id, artifact, is_malicious} to score instead of generating one.",
+    )
+    parser.add_argument(
+        "--no_prefilter",
+        action="store_true",
+        help="Send every artifact to the LLM (skip the heuristic pre-filter) to measure the model alone.",
     )
     args = parser.parse_args()
 
     print("--- Starting DFIR-Guardrail Pipeline ---")
-    model_name = os.getenv("LLM_MODEL", "phi3:mini")
-    ollama_host = os.getenv("LLM_ENDPOINT", "http://localhost:11434")
+
+    # Start live Prometheus metrics exporter if configured
+    if config.prometheus_enabled:
+        started = start_metrics_server(config.prometheus_port)
+        if started:
+            logger.info(
+                f"Prometheus metrics exporter started on port {config.prometheus_port}",
+                extra={
+                    "event_type": "metrics_server_started",
+                    "port": config.prometheus_port,
+                },
+            )
+        else:
+            logger.warning(
+                f"Failed to bind Prometheus exporter on port {config.prometheus_port} or client not installed",
+                extra={
+                    "event_type": "metrics_server_skipped",
+                    "port": config.prometheus_port,
+                },
+            )
 
     blue_team = BlueTeamGuardrail(
-        ollama_host=ollama_host,
-        model_name=model_name,
+        ollama_host=config.llm_endpoint,
+        model_name=config.llm_model,
         max_concurrent_requests=args.concurrency,
+        config=config,
     )
 
-    if args.input_dir and args.output_dir:
-        dataset = load_real_data(args.input_dir)
+    blue_team.skip_prefilter = args.no_prefilter
+    skipped: List[Dict[str, str]] = []
+    if args.input_dir or args.mode == "ops":
+        if not args.input_dir:
+            print("Error: --input_dir must be specified in 'ops' mode.")
+            return 2
+        if not os.path.exists(args.input_dir):
+            print(f"Error: input path does not exist: {args.input_dir}")
+            return 2
+        dataset = load_forensic_data(args.input_dir, skipped=skipped)
+        if args.mode == "compare":
+            dataset = list(dataset)  # compare scans the data twice
         is_sim = False
+    elif args.dataset_file:
+        with open(args.dataset_file, encoding="utf-8") as f:
+            dataset = json.load(f)
+        is_sim = True
     else:
         red_team = RedTeamPoisoner()
         dataset = red_team.generate_dataset(
@@ -291,26 +381,20 @@ async def async_main():
         )
         is_sim = True
 
-    if not dataset:
-        print("No valid high-risk data found.")
-        return
+    if is_sim:
+        print(f"-> Generated {len(dataset)} items.")
 
-    print(
-        f"-> {'Generated' if is_sim else 'Loaded'} {len(dataset)} items containing high-risk fields."
-    )
-
-    # Warm up the LLM to load the model into VRAM and avoid skewing the timer
+    # Warm up the LLM
     print("Warming up the LLM (Loading model into VRAM)...")
-    await blue_team.classify_artifact(
-        "warmup", {"Message": "Hello model, please wake up."}
-    )
+    await blue_team.warmup()
+    print_run_config(blue_team, args.concurrency)
 
     if args.mode == "compare":
         print("\n--- Running Pure Sequential Baseline ---")
         _, report_seq = await run_guardrail_scan_async(
             dataset, blue_team, is_simulation=is_sim, mode="sequential"
         )
-        print("\n--- Running Asynchronous Sequential ---")
+        print("\n--- Running Async (bounded concurrency) ---")
         _, analyst_report = await run_guardrail_scan_async(
             dataset, blue_team, is_simulation=is_sim, mode="async"
         )
@@ -320,7 +404,7 @@ async def async_main():
         async_t = analyst_report["metadata"]["scan_time_seconds"]
 
         print(
-            f"{'Metric':<25} | {'Sequential Baseline':<20} | {'Async Sequential':<20}"
+            f"{'Metric':<25} | {'Sequential Baseline':<20} | {'Async (bounded)':<20}"
         )
         print("-" * 71)
         print(f"{'Scan Time':<25} | {seq_t:<19.2f}s | {async_t:<19.2f}s")
@@ -338,6 +422,8 @@ async def async_main():
                     f"{v_batch:.2%}" if isinstance(v_batch, float) else str(v_batch)
                 )
                 print(f"{k:<25} | {v_seq_str:<20} | {v_batch_str:<20}")
+            warn_if_backend_failed(seq_metrics)
+            warn_if_backend_failed(batch_metrics)
     else:
         _, analyst_report = await run_guardrail_scan_async(
             dataset,
@@ -352,16 +438,29 @@ async def async_main():
                     print(f"{k}: {v:.2%}")
                 else:
                     print(f"{k}: {v}")
+            warn_if_backend_failed(analyst_report["metadata"]["metrics"])
+
+    total = analyst_report["metadata"]["total_artifacts_scanned"]
+    if total == 0 and not skipped:
+        print("No valid data found.")
+    analyst_report["metadata"]["skipped_files"] = skipped
+    if skipped:
+        print(f"WARNING: {len(skipped)} file(s) were NOT fully scanned:")
+        for sk in skipped:
+            print(f"  [{sk['reason']}] {sk['filepath']}: {sk['detail']}")
 
     output_dir = args.output_dir or "."
     os.makedirs(output_dir, exist_ok=True)
     filename = "guardrail_simulation.json" if is_sim else "guardrail_analysis.json"
     output_path = os.path.join(output_dir, filename)
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(analyst_report, f, indent=4)
+        json.dump(analyst_report, f, indent=4, default=str)
 
     await blue_team.close()
+    # Exit non-zero when a file was too big or unreadable: a clean report must not hide that
+    incomplete = any(sk["reason"] in ("size_limit", "parse_error") for sk in skipped)
+    return 1 if incomplete else 0
 
 
 if __name__ == "__main__":
-    asyncio.run(async_main())
+    sys.exit(asyncio.run(async_main()))
