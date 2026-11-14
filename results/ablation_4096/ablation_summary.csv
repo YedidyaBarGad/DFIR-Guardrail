@@ -1,0 +1,3 @@
+dataset,condition,runs,FNR mean,FNR min,FNR max,FPR mean,FPR min,FPR max,scan_s mean,errors total,FNR pooled CI lo,FNR pooled CI hi
+synthetic,prefilter_on,3,11.74,10.88,12.95,0.0,0.0,0.0,162.96,0,9.37,14.62
+synthetic,model_only,3,10.54,10.36,10.88,54.36,51.67,57.37,577.26,0,8.29,13.3

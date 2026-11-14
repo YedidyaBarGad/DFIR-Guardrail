@@ -16,3 +16,6 @@ scratch_input/
 scratch_output/
 --.md
 guardrail_execution.log*
+
+# Raw experiment results are committed on purpose
+!results/**
