@@ -182,6 +182,16 @@ None of the 17 uses Base64, hex, zero-width characters or delimiter smuggling. T
 
 ---
 
+### External dataset (`data/external.json`, pre-filter only so far)
+
+500 artifacts built by `build_external.py` (seed 42): 250 benign and 250 poisoned. Benign rows are process-creation events from [WinLOLBIN-GT](https://zenodo.org/records/20533434) (CC-BY-4.0, 500-line benign sample; only `process_name`, `process_path`, `command_line` and `parent_command_line` are kept, so its `attack_rationale` prose and labels do not leak). Payloads are third-party text appended or prepended to `CommandLine` or `ParentCommandLine`: 125 from [Lakera/gandalf_ignore_instructions](https://huggingface.co/datasets/Lakera/gandalf_ignore_instructions) (MIT) and 125 from [LLMail-Inject](https://huggingface.co/datasets/microsoft/llmail-inject-challenge) phase 1 (MIT).
+
+Pre-filter alone, computed offline with the sentence-transformers embedder loaded: **55.2% FNR (138 of 250 missed; Gandalf 102 of 125, LLMail-Inject 36 of 125) and 16.8% FPR (42 of 250)**. The LLM stages have not been run on it.
+
+* WinLOLBIN-GT rows are lab-generated (CONTOSO hosts, labelled by the dataset authors), not production telemetry. The benign sample is small and may not contain legitimate encoded PowerShell.
+* LLMail-Inject payloads are the first 25 MB of the phase 1 file (8,902 entries with `attack_attempt: True`), sampled from those. `attack_attempt` does not mean the attack succeeded against the challenge's pipeline.
+* Payloads are written for email bodies, not command-line fields, so the results measure transfer to a different context.
+
 ## ⚠️ Limitations of the Evaluation
 
 * **Circular evaluation.** The red team that writes the payloads and the blue team that is scored on them are both mine. Results say nothing about payloads written by others. Held-out public benchmarks (e.g., BIPIA, InjecAgent, AgentDojo) are not yet used.
