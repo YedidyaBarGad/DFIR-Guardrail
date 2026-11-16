@@ -1,0 +1,5 @@
+,asr_without_guardrail,asr_without_guardrail,asr_without_guardrail,asr_with_guardrail,asr_with_guardrail,asr_with_guardrail
+,mean,min,max,mean,min,max
+source,,,,,,
+gandalf,7.2,6.9,7.5,2.7,2.4,3.1
+llmail,29.2,28.6,29.8,2.4,2.2,2.8

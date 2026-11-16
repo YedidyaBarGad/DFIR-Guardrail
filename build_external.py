@@ -1,7 +1,7 @@
 """Build data/external.json: third-party payloads (LLMail-Inject, Lakera Gandalf) in
 third-party benign process events (WinLOLBIN-GT). Output is {id, artifact, is_malicious}.
 
-Inputs (download separately, see README "External dataset"):
+Inputs (download separately, see docs/RESULTS.md "External dataset"):
   --benign   winlolbin_gt_sample_unprocessed_benign_500_lines.csv (Zenodo 20533434, CC-BY-4.0)
   --gandalf  Lakera/gandalf_ignore_instructions parquet files (MIT)
   --llmail   llmail-inject labelled_unique_submissions_phase1.json, possibly truncated (MIT)

