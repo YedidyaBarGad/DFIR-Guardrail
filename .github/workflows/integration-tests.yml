@@ -43,6 +43,8 @@ jobs:
       env:
         LLM_ENDPOINT: "http://localhost:11434"
         LLM_MODEL: "phi3:mini"
+        # CPU-only runner: a phi3:mini call exceeds the 15s default and trips the circuit breaker
+        LLM_TIMEOUT: "120"
       run: |
         pytest -q tests/
         PYTHONPATH=. python src/pipeline.py --mode compare --num_samples 10
