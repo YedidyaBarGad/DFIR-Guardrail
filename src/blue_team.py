@@ -13,10 +13,6 @@ import httpx
 
 from src.config import Config, get_settings
 from src.logger import get_logger
-from src.metrics import (
-    record_llm_request_duration,
-    set_circuit_breaker_status,
-)
 
 logger = get_logger("dfir_guardrail.blue_team")
 
@@ -275,6 +271,27 @@ def detect_roleplay_override(text: str) -> Tuple[bool, Optional[str]]:
     return False, None
 
 
+# Pure function words only (no "tell", "password", "ignore"...), so the gate is not fitted
+# to any payload set. Forensic fields (paths, hashes, switches) rarely contain three.
+PROSE_STOPWORDS = frozenset(
+    "the a an you your i me my we our to of and is are be this that it all as not "
+    "do for with in on if or by from".split()
+)
+
+
+def looks_like_prose(artifact_json: Any) -> bool:
+    """True if any string field reads as natural language (>=5 words, >=3 distinct stopwords).
+
+    An injection must address the model in language it reads, so this is a recall-first
+    gate: it decides what the LLM should look at, not what is malicious.
+    """
+    for s in BlueTeamGuardrail._extract_strings(artifact_json):
+        words = re.findall(r"[a-z]+", _strip_invisible(s).lower())
+        if len(words) >= 5 and len(PROSE_STOPWORDS.intersection(words)) >= 3:
+            return True
+    return False
+
+
 class BlueTeamGuardrail:
     """Enterprise DFIR Guardrail inspecting forensic artifacts for indirect prompt injections."""
 
@@ -302,6 +319,9 @@ class BlueTeamGuardrail:
         self.semaphore = asyncio.Semaphore(concurrency)
         self.active_requests = 0
         self.embedder_failures = 0
+        self.legacy_gate = (
+            False  # True reproduces the pre-v2 gate behind the README runs
+        )
         self.skip_prefilter = (
             False  # True = every artifact goes to the LLM (model-only evaluation)
         )
@@ -310,7 +330,6 @@ class BlueTeamGuardrail:
         self.consecutive_timeouts = 0
         self.circuit_open = False
         self.circuit_open_time = 0.0
-        set_circuit_breaker_status(0)
 
         # Resilience: Configured timeout to mitigate DoS
         limits = httpx.Limits(
@@ -552,6 +571,23 @@ class BlueTeamGuardrail:
         return head + marker + tail
 
     def _pre_filter_and_clean(self, artifact_json: Any) -> Tuple[bool, Any]:
+        """Legacy gate: (suspicious, cleaned). Kept for --legacy_gate and the published runs."""
+        _, legacy, cleaned = self._gate(artifact_json)
+        return legacy, cleaned
+
+    def _route(self, artifact_json: Any) -> Tuple[str, Any]:
+        tier, _, cleaned = self._gate(artifact_json)
+        return tier, cleaned
+
+    def _gate(self, artifact_json: Any) -> Tuple[str, bool, Any]:
+        """Return (tier, legacy_suspicious, cleaned artifact); tier is "rule", "model" or "clean".
+
+        rule:  a high-precision rule matched (override phrasing, role-play, delimiter);
+               flag without asking the LLM, so the LLM cannot veto it.
+        model: some weaker signal (entropy, decoding, padding, embedder) or any field that
+               reads as natural-language prose; the LLM decides.
+        clean: none of the above; labelled benign without the LLM.
+        """
         full_text = "\n".join(self._extract_strings(artifact_json))
         cleaned_text = _strip_invisible(full_text)
 
@@ -560,24 +596,34 @@ class BlueTeamGuardrail:
         if decoded_payloads:
             analyzable_text += "\n" + "\n".join(decoded_payloads)
 
-        is_suspicious = (
-            high_entropy_found
-            or bool(decoded_payloads)
-            or detect_roleplay_override(analyzable_text)[0]
-            or detect_cognitive_load(cleaned_text, artifact_json)[0]
+        rule_hit = (
+            detect_roleplay_override(analyzable_text)[0]
+            or HEURISTIC_REGEX.search(analyzable_text) is not None
             or any(d in full_text for d in DELIMITERS)
+        )
+        legacy = (
+            rule_hit
+            or high_entropy_found
+            or bool(decoded_payloads)
+            or detect_cognitive_load(cleaned_text, artifact_json)[0]
             or (
                 bool(analyzable_text.strip())
                 and self._semantic_or_heuristic_match(analyzable_text)
             )
         )
+        if rule_hit:
+            tier = "rule"
+        elif legacy or looks_like_prose(artifact_json):
+            tier = "model"
+        else:
+            tier = "clean"
 
         cleaned_artifact = self._trim(artifact_json)
         if decoded_payloads:
             if not isinstance(cleaned_artifact, dict):
                 cleaned_artifact = {"artifact": cleaned_artifact}
             cleaned_artifact["__decoded_obfuscation__"] = "; ".join(decoded_payloads)
-        return is_suspicious, cleaned_artifact
+        return tier, legacy, cleaned_artifact
 
     @staticmethod
     def _build_user_content(artifact_json: Any) -> str:
@@ -630,7 +676,6 @@ class BlueTeamGuardrail:
                 )
                 self.circuit_open = False
                 self.consecutive_timeouts = 0
-                set_circuit_breaker_status(0)
             else:
                 logger.warning(
                     f"Circuit breaker is OPEN. Fast-failing artifact {artifact_id}.",
@@ -702,7 +747,6 @@ class BlueTeamGuardrail:
                 llm_text = response.json().get("message", {}).get("content", "")
 
             duration = time.time() - start_time
-            record_llm_request_duration(duration)
 
             try:
                 parsed_res = json.loads(llm_text)
@@ -735,7 +779,6 @@ class BlueTeamGuardrail:
 
         except httpx.TimeoutException:
             duration = time.time() - start_time
-            record_llm_request_duration(duration)
             self.consecutive_timeouts += 1
             logger.error(
                 f"TIMEOUT | Artifact ID: {artifact_id} | Duration: {duration:.2f}s | Consecutive Timeouts: {self.consecutive_timeouts}",
@@ -756,11 +799,9 @@ class BlueTeamGuardrail:
                 )
                 self.circuit_open = True
                 self.circuit_open_time = time.time()
-                set_circuit_breaker_status(1)
             return -1
         except Exception as e:
             duration = time.time() - start_time
-            record_llm_request_duration(duration)
             logger.error(
                 f"ERROR | Artifact ID: {artifact_id} | Duration: {duration:.2f}s | Exception: {e} | Active Requests: {self.active_requests}",
                 extra={
@@ -784,13 +825,18 @@ class BlueTeamGuardrail:
         self.consecutive_timeouts = 0
         if self.circuit_open:
             self.circuit_open = False
-            set_circuit_breaker_status(0)
 
     async def classify_artifact(self, artifact_id: str, artifact_json: dict) -> int:
         """Classify a single artifact, pre-filtering benign artifacts and evaluating suspicious items."""
-        is_suspicious, cleaned_json = self._pre_filter_and_clean(artifact_json)
-
-        if not is_suspicious and not self.skip_prefilter:
+        tier, legacy, cleaned_json = self._gate(artifact_json)
+        if self.skip_prefilter:  # model alone: every artifact goes to the LLM
+            pass
+        elif self.legacy_gate:  # published runs: pre-filter gate, LLM may veto
+            if not legacy:
+                return 0
+        elif tier == "rule":
+            return 1  # high-precision rule: the LLM may not veto it
+        elif tier == "clean":
             return 0
 
         if artifact_id != "warmup":
