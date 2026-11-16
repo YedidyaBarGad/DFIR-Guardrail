@@ -1,0 +1,7 @@
+dataset,condition,run,scan_s,Total processed,TP,TN,FP,FN,Errors,False Positive Rate (FPR),False Negative Rate (FNR),valid,FNR,FPR
+external,prefilter_on,1,150.83,500,98,233,17,152,2,0.068,0.608,True,60.8,6.800000000000001
+external,prefilter_on,2,150.33,500,94,235,15,156,2,0.06,0.624,True,62.4,6.0
+external,prefilter_on,3,152.59,500,93,234,16,157,1,0.064,0.628,True,62.8,6.4
+external,model_only,1,360.3,500,227,150,100,23,2,0.4,0.092,True,9.2,40.0
+external,model_only,2,357.5,500,228,149,101,22,2,0.404,0.088,True,8.799999999999999,40.400000000000006
+external,model_only,3,360.41,500,230,143,107,20,4,0.428,0.08,True,8.0,42.8

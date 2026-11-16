@@ -1,0 +1,5 @@
+condition,source,mean,min,max
+model_only,gandalf,0.8,0.8,0.8
+model_only,llmail,16.5,15.2,17.6
+prefilter_on,gandalf,81.6,81.6,81.6
+prefilter_on,llmail,42.4,40.0,44.0
