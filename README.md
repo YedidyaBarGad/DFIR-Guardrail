@@ -13,21 +13,29 @@
 ## 🔎 What I found
 
 1. **My headline number came from marking my own homework.** On 1,000 synthetic artifacts from my own generator, the pre-filter alone misses 1.55% (3 of 193) with 0 false positives. On payloads I did not write (125 Lakera Gandalf, 125 LLMail-Inject, placed in 250 benign process events) it misses 55.2% with 16.8% false positives (53.2% with the current rules, see Results), and on my 132 hand-built evasive payloads in `hard.json` it misses 92.4% (81.1% with the current rules). Do not quote 1.55%.
-2. **The design caps itself.** Only what the pre-filter flags reaches the LLM, so the pre-filter's misses are the system's misses and the LLM can only lower recall. On the external set the default pipeline misses 62.0%, worse than the pre-filter alone (55.2%) and far worse than `phi3:mini` alone (8.7%), which catches nearly all of the 125 short Gandalf overrides that the pre-filter never forwards.
+2. **The original design capped itself.** Only what the pre-filter flags reaches the LLM, so the pre-filter's misses are the system's misses and the LLM can only lower recall. On the external set the legacy pipeline misses 62.0%, worse than the pre-filter alone (55.2%) and far worse than `phi3:mini` alone (8.7%), which catches nearly all of the 125 short Gandalf overrides that the pre-filter never forwards.
 3. **The LLM veto is a trade, and neither stage is usable alone.** On synthetic data every veto lost a real detection (18–22 per run, FNR 1.55% to 10.9–13.0%) and removed no false positives, because there were none. On the external set it drops 14–19 real detections and clears about 26 of the pre-filter's 42 false positives (FPR 16.8% to 6.4%). The model alone flags 41–54% of benign artifacts, so its low miss rate on short overrides may partly be over-flagging.
 4. **Fail-closed scoring inflated my numbers, and context overflow failed silently.** Errors count as detections, so my first ablation attempt, where every LLM request failed, scored the LLM alone at 0.0% FNR (100% FPR). At `num_ctx=2048`, four ~5,300-character padded artifacts overflowed the window and passed my 1% validity check at 0.4% errors, hiding about 2 points of FNR (8.6% reported; 10.7% with the errors counted as misses). Errors were 1–4 per run on the external set and move FNR by under 2 points.
-5. **None of this is a benchmark yet.** The external set is 500 artifacts (50% poisoned) with lab-generated benign events, payloads written for email and chat rather than forensic fields, one model, and 3 repeats of one dataset. Attack success against a downstream analyst model is unmeasured.
+5. **Fixing the structure, not the payloads, removes most of the ceiling (offline estimate).** Gate v2 (now the default) flags rule hits without asking the LLM, and sends any field that reads as English prose to the LLM. Re-scored from the stored model-only runs, external FNR falls from 62.0% to 21.6–22.4% at the same 5.6–6.0% FPR, and synthetic FNR from 11.7% to 5.2% at 0% FPR. These are dev-set numbers: I designed v2 after seeing these data. The test is `hard.json` and a held-out set, not run yet (see Evaluation protocol).
+6. **None of this is a benchmark yet.** The external set is 500 artifacts (50% poisoned) with lab-generated benign events, payloads written for email and chat rather than forensic fields, one model, and 3 repeats of one dataset. Attack success against a downstream analyst model is unmeasured.
 
 ---
 
 ## 🏗️ Architecture
 
 ```text
-artifact ──► pre-filter ──► not suspicious ──────────────► benign (0)
-                 │
-                 └─ suspicious ──► LLM classifier ──► 0 / 1
-                                        └─ timeout/error ─► flagged (fail closed)
+gate v2 (default)
+artifact ──► high-precision rule hit ──────────────────────► flagged (1), no LLM veto
+         ├─► prose field or weak signal ─► LLM classifier ─► 0 / 1
+         │                                     └─ timeout/error ─► flagged (fail closed)
+         └─► neither ──────────────────────────────────────► benign (0)
+
+legacy gate (--legacy_gate; every published run except the v2 estimate)
+artifact ──► pre-filter ──► suspicious ──► LLM classifier ─► 0 / 1 (LLM may veto)
+                        └─► not suspicious ────────────────► benign (0)
 ```
+
+Why v2: in the legacy gate an artifact is flagged only if the pre-filter AND the LLM flag it, so the system can never beat the weaker stage. v2 gives each stage the job it is good at. The rules (override and role-play phrasing, delimiter tags) had 0 false positives on synthetic and external benign data, so they decide alone. The prose check (5+ words and 3+ distinct English function words such as *the, you, to, and* in one field) is a recall-first router: an injection has to address the model in language, while paths, hashes and switches rarely contain three function words. The stopword list holds function words only, so it is not fitted to any payload set.
 
 ### 🔴 Red team (`src/red_team.py`)
 
@@ -42,11 +50,11 @@ Generates a synthetic dataset of Amcache/Prefetch-style artifacts and injects pa
 
 ### ⚙️ Pipeline (`src/pipeline.py`)
 
-* **`ops`:** parses real forensic exports (`src/parsers/`), normalizes them to Elastic Common Schema, scans high-risk fields and writes a JSON analyst report. The parsers are new and lightly tested, and `ops` has not been run on public sample forensic data.
+* **`ops` (experimental, unvalidated):** parses forensic exports (`src/parsers/`), normalizes them to Elastic Common Schema, scans high-risk fields and writes a JSON analyst report. The parsers have unit tests only; `ops` has never been run on real or public sample forensic data, and no number in this README comes from it. The CLI prints a warning when you use it.
 * **`sim`:** generates (or loads, with `--dataset_file`) poisoned and benign artifacts and reports FPR and FNR.
 * **`compare`:** times the sequential scanner against the bounded-concurrency one.
 
-Config, JSON logging and Prometheus metrics exist (`src/config.py`, `src/logger.py`, `src/metrics.py`) but have not been run at scale or against a real SIEM.
+Config comes from environment variables (`src/config.py`); logs are JSON lines (`src/logger.py`), which is a convenience, not a tested SIEM integration.
 
 ---
 
@@ -89,6 +97,7 @@ python -m src.pipeline --mode ops --input_dir /path/to/json --output_dir /path/t
 | `--num_samples`, `--poison_ratio` | synthetic dataset size (default 50) and poisoned share (default 0.2) |
 | `--dataset_file` | sim only: JSON list of `{id, artifact, is_malicious}` to score instead of generating |
 | `--no_prefilter` | send every artifact to the LLM |
+| `--legacy_gate` | pre-v2 gate (pre-filter gates the LLM, LLM may veto); reproduces the published runs |
 
 ### Reproducing the results
 
@@ -98,6 +107,9 @@ python -m src.pipeline --mode ops --input_dir /path/to/json --output_dir /path/t
 | `notebooks/external_eval.ipynb` | external-dataset runs (`results/external/`) |
 | `notebooks/padding_probe.ipynb` | padding probe (`results/padding_probe.csv`) |
 | `notebooks/colab_hard_eval.ipynb` | `hard.json` run |
+| `python -m scripts.gate_v2_offline` | gate v2 estimate from stored runs (no GPU) |
+
+The ablation and external notebooks now run three conditions: `prefilter_on` (`--legacy_gate`, the published numbers), `gate_v2` and `model_only`.
 
 ---
 
@@ -112,7 +124,7 @@ Raw output: [`results/ablation_4096/`](results/ablation_4096/) ([runs](results/a
 | Configuration | TP | FN | FP | FNR | FNR pooled 95% CI* | FPR | Scan time |
 |---|---|---|---|---|---|---|---|
 | Pre-filter only (deterministic; identical with embedder on or off) | 190 | 3 | 0 | 1.55% | n/a | 0.00% | n/a |
-| Pre-filter + LLM (default) | 168–172 | 21–25 | 0 | 10.9–13.0% (mean 11.7%) | 9.4–14.6% | 0.00% | 159–165 s |
+| Pre-filter + LLM (legacy gate) | 168–172 | 21–25 | 0 | 10.9–13.0% (mean 11.7%) | 9.4–14.6% | 0.00% | 159–165 s |
 | LLM only | 172–173 | 20–21 | 417–463 | 10.4–10.9% (mean 10.5%) | 8.3–13.3% | 51.7–57.4% (mean 54.4%) | 575–578 s |
 
 \* Wilson interval over the 3 runs pooled as if independent. They repeat the same 193 artifacts, so it understates real uncertainty.
@@ -130,12 +142,12 @@ Raw output: [`results/ablation_4096/`](results/ablation_4096/) ([runs](results/a
 |---|---|---|---|---|---|
 | Pre-filter only, as run (embedder on, rules skipped) | 55.2% | n/a | 16.8% | n/a | n/a |
 | Pre-filter only, current code (rules always run; same with embedder on or off) | 53.2% | n/a | 16.8% | n/a | n/a |
-| Pre-filter + LLM (default) | 60.8–62.8% (mean 62.0%) | 58.5–65.4% | 6.0–6.8% (mean 6.4%) | 150–153 s | 1–2 |
+| Pre-filter + LLM (legacy gate) | 60.8–62.8% (mean 62.0%) | 58.5–65.4% | 6.0–6.8% (mean 6.4%) | 150–153 s | 1–2 |
 | LLM only | 8.0–9.2% (mean 8.7%) | 6.9–10.9% | 40.0–42.8% (mean 41.1%) | 358–360 s | 2–4 |
 
 \* As above. Errors are scored as detections; counted as misses, FNR is 61.6–63.2% and 9.6–10.0%.
 
-**Correction.** The pre-filter-only figures above were first labelled "offline". They were in fact computed with the embedder on, where the keyword rules in `HEURISTIC_REGEX` were skipped (a code gap, now fixed: the rules always run and an embedder error fails closed). `scripts/prefilter_only.py` reproduces both modes (`results/prefilter_only/`). The full-pipeline runs below used the old behaviour: every artifact they flagged is also flagged by the current pre-filter (checked by `scripts/union_gate.py`), but the current pre-filter flags 5 more poisoned artifacts on this set (all Gandalf), so a re-run would move the default pipeline slightly. Synthetic and FPR figures are unchanged.
+**Correction.** The pre-filter-only figures above were first labelled "offline". They were in fact computed with the embedder on, where the keyword rules in `HEURISTIC_REGEX` were skipped (a code gap, now fixed: the rules always run and an embedder error fails closed). `scripts/prefilter_only.py` reproduces both modes (`results/prefilter_only/`). The full-pipeline runs below used the old behaviour: every artifact they flagged is also flagged by the current pre-filter (checked by `scripts/union_gate.py`), but the current pre-filter flags 5 more poisoned artifacts on this set (all Gandalf), so a re-run would move the legacy pipeline slightly. Synthetic and FPR figures are unchanged.
 
 FNR by payload source (125 poisoned artifacts each, range over 3 runs). The pre-filter column is the as-run figure; current code gives 77.6% (Gandalf) and 28.8% (LLMail-Inject):
 
@@ -145,7 +157,7 @@ FNR by payload source (125 poisoned artifacts each, range over 3 runs). The pre-
 | LLMail-Inject | 28.8% | 42.4% (40.0–44.0%) | 16.5% (15.2–17.6%) |
 
 * **Union gate (offline, from stored runs, `scripts/union_gate.py`).** Flagging when the pre-filter OR the model-only run flags gives FNR 1.6–2.0% (Gandalf 0.8%, LLMail-Inject 2.4–3.2%) at FPR 50.8–53.6%, against 8.0–9.2% / 40–43% for the model alone. On synthetic data it reaches 0.0% FNR at 51.7–57.4% FPR. It removes the miss ceiling but pays the full cost of the model's false positives and of running the model on every artifact, so it is a recall upper bound, not a usable setting. The open problem is the model's 41–54% FPR, which a better or calibrated classifier would have to fix.
-* On this set the ranking reverses: the pre-filter misses 102 of 125 plain "ignore previous instructions" phrasings, which the model catches, but the default pipeline never forwards them.
+* On this set the ranking reverses: the pre-filter misses 102 of 125 plain "ignore previous instructions" phrasings, which the model catches, but the legacy pipeline never forwards them (gate v2 routes them, see below).
 * The LLM also vetoes 14–19 real LLMail-Inject detections, yet clears about 26 of the pre-filter's 42 false positives.
 * The LLM-only catch rate comes with a 41% FPR, so part of it may be over-flagging; this data does not separate the two.
 * WinLOLBIN-GT rows are lab-generated (CONTOSO hosts), not production telemetry, and may not contain legitimate encoded PowerShell. LLMail-Inject payloads are sampled from the first 25 MB of the phase 1 file (8,902 entries with `attack_attempt: True`, which does not mean the attack succeeded). Payloads were written for email, so the results measure transfer to command-line fields.
@@ -171,6 +183,32 @@ Seventeen synthetic artifacts are missed in all three pre-filter + LLM runs (ids
 
 None of the 17 uses Base64, hex, zero-width characters or delimiter smuggling. The stored run output does not keep the text of missed artifacts, so I checked by regenerating the seed-42 dataset with `src/red_team.py` (193 poisoned, matching the runs) and searching each artifact by regex. This assumes the generator is unchanged since the runs. The obfuscation the project was built around is not where it fails; long filler fields are (11 of 17). With 17 artifacts from one generator these are counts, not rates.
 
+### Gate v2 (offline estimate, dev data)
+
+`scripts/gate_v2_offline.py` routes each artifact with the v2 gate (embedder off) and, for the model tier, takes the verdict from the stored model-only runs, which sent the same cleaned input to the LLM. It is the v2 pipeline up to model non-determinism; no new LLM run was made.
+
+| Dataset | Rule tier (poisoned / benign) | Sent to LLM (poisoned / benign) | Never seen (poisoned) | v2 FNR | v2 FPR | Legacy pipeline FNR / FPR |
+|---|---|---|---|---|---|---|
+| Synthetic (193 / 807) | 164 / 0 | 27 / 0 | 2 (1.0%) | 5.2% (all 3 runs) | 0.0% | 10.9–13.0% / 0.0% |
+| External (250 / 250) | 16 / 0 | 198 / 42 | 36 (14.4%) | 21.6–22.4% | 5.6–6.0% | 60.8–62.8% / 6.0–6.8% |
+| `hard.json` (132 / 368) | 21 / 6 | 54 / 40 | 57 (43.2%) | no model-only run | | no valid run |
+
+* External by source: Gandalf FNR 28.8–29.6% (legacy 81.6%), LLMail-Inject 13.6–16.0% (legacy 40.0–44.0%).
+* The external rule tier is small (16 of 250); the gain comes from routing. 36 poisoned external artifacts still reach neither stage, which is now the floor.
+* `hard.json` is the closest thing to a test set here: 43% of its evasive payloads are invisible to the v2 gate, and 6 benign traps hit a rule. Its full-pipeline number is still unmeasured.
+* The model's own false positives are unchanged; v2 only stops the gate from hiding the model's recall.
+
+## 🧪 Evaluation protocol (frozen from this commit)
+
+The synthetic and external sets are **dev data**: I designed gate v2 after seeing them, so their numbers are optimistic. Results that can be cited must come from data the design never saw:
+
+1. **Freeze.** Gate v2 as committed (rules, stopword list, thresholds). Every run records its commit hash; any change to the gate means a new freeze and new held-out data.
+2. **`hard.json` full pipeline** (`notebooks/colab_hard_eval.ipynb`): run once with v2 and once with `--no_prefilter`.
+3. **Held-out external set.** `build_external.py --seed 7 --exclude data/external.json --out data/holdout.json` skips every payload and benign row already in `external.json`. The 500-line WinLOLBIN-GT sample is fully used by `external.json`, so this needs a larger benign file (e.g. the full WinLOLBIN-GT release); the script stops with an error otherwise.
+4. **Attack success, not just detection** (`scripts/attack_success.py`). For each malicious carrier event and payload, an analyst LLM triages the clean and the poisoned event. An attack succeeds when the verdict flips from malicious to benign; with the guardrail it also has to pass unflagged (flagged events go to a human). It reports ASR with and without the guardrail. The built-in 8 LOLBin carriers and the red-team payloads are self-written and serve only as a smoke test; for a result, pass `--carriers` (e.g. WinLOLBIN-GT malicious rows) and `--payloads` from the held-out sources.
+
+None of steps 2–4 has been run yet; they need a GPU and the source datasets.
+
 ### Superseded runs
 
 Both were wrong because fail-closed scoring counts errors as detections. CSVs only are kept (logs are not in the repo).
@@ -186,7 +224,7 @@ Both were wrong because fail-closed scoring counts errors as detections. CSVs on
 * **Low payload diversity.** The generator draws from 9 base injection strings, 8 role-play strings, 1 delimiter-smuggling template, 4 cognitive-load techniques and 6 obfuscation wrappers, injected into 4 fields by 3 methods. The 193 poisoned samples are far from independent.
 * **Weak benign data.** Synthetic benign artifacts come from 10 process templates with dummy hashes, so the pre-filter's 0% FPR there says little. The external benign set is lab-generated, has 250 events, and the 50% poison rate is far above any real feed, which understates the cost of false positives.
 * **Easy obfuscations only.** Base64, hex and zero-width characters are undone deterministically. Other languages, homoglyphs, payloads split across fields or artifacts, and adaptive attackers are not tested.
-* **Detection only.** Attack success against a downstream analyst model, with or without the guardrail, and any loss in benign triage quality are not measured.
+* **Detection only (so far).** `scripts/attack_success.py` measures attack success against an analyst model, but it has not been run; loss in benign triage quality is not measured.
 * **Partial ablation.** The embedder and entropy checks are not separated, so their individual contribution is unknown, and `hard.json` has no valid full-pipeline run.
 * **The guard is itself an LLM.** System/user roles reduce but are not a security boundary against injection into the guard; a payload aimed at the classifier can jailbreak a small model like `phi3:mini`.
 * **Three repeats, one model.** Repeats share a dataset, so ranges understate real variance. No memory measurements were taken; no OOM was observed on the T4.
@@ -195,7 +233,7 @@ Both were wrong because fail-closed scoring counts errors as detections. CSVs on
 
 ## 📁 Layout and data
 
-* `src/`: red team, blue team, pipeline, parsers, config, logging, metrics. `tests/`: unit and integration tests.
+* `src/`: red team, blue team, pipeline, parsers (experimental), config, logging. `tests/`: unit and integration tests.
 * `data/hard.json`: hand-built evasive set. `data/external.json`: external set (rebuild with `build_external.py`, which needs the three source datasets above). `hard_dataset.py`, `export_dataset.py`: dataset helpers.
 * `results/`: raw CSVs, run reports and logs behind every number in this README.
 * Licence: code is MIT (see `LICENSE`); the datasets below keep their own licences.

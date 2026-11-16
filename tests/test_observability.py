@@ -7,19 +7,6 @@ import pytest
 from src.blue_team import BlueTeamGuardrail
 from src.config import Config, get_settings
 from src.logger import SIEMJSONFormatter, get_logger
-from src.metrics import (
-    artifacts_scanned_total,
-    circuit_breaker_status,
-    llm_request_duration_seconds,
-    record_artifact_scanned,
-    record_llm_request_duration,
-    record_scan_duration,
-    record_threat_detected,
-    scan_duration_seconds,
-    set_circuit_breaker_status,
-    start_metrics_server,
-    threats_detected_total,
-)
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +26,6 @@ def test_config_defaults():
     assert config.log_level == "INFO"
     assert config.log_format == "json"
     assert config.log_file == "guardrail_execution.log"
-    assert config.prometheus_enabled is False
-    assert config.prometheus_port == 8000
     assert config.max_file_size_mb == 50
     assert config.shannon_entropy_threshold == 4.5
     assert config.semantic_similarity_threshold == 0.45
@@ -55,8 +40,6 @@ def test_config_environment_overrides(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("LOG_FORMAT", "text")
     monkeypatch.setenv("LOG_FILE", "custom_guardrail.log")
-    monkeypatch.setenv("PROMETHEUS_ENABLED", "true")
-    monkeypatch.setenv("PROMETHEUS_PORT", "9100")
     monkeypatch.setenv("MAX_FILE_SIZE_MB", "100")
     monkeypatch.setenv("SHANNON_ENTROPY_THRESHOLD", "5.2")
     monkeypatch.setenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.85")
@@ -69,8 +52,6 @@ def test_config_environment_overrides(monkeypatch):
     assert settings.log_level == "DEBUG"
     assert settings.log_format == "text"
     assert settings.log_file == "custom_guardrail.log"
-    assert settings.prometheus_enabled is True
-    assert settings.prometheus_port == 9100
     assert settings.max_file_size_mb == 100
     assert settings.shannon_entropy_threshold == 5.2
     assert settings.semantic_similarity_threshold == 0.85
@@ -129,22 +110,6 @@ def test_get_logger_stream_and_file():
             os.remove("test_exec.log")
         except OSError:
             pass
-
-
-def test_metrics_recording_and_fallback():
-    """Verify Prometheus metrics and safe mock fallback operations."""
-    # Test recording helpers without exceptions
-    record_artifact_scanned(source="evtx_powershell.json", status="benign")
-    record_artifact_scanned(source="evtx_powershell.json", status="threat")
-    record_threat_detected(threat_type="prompt_injection")
-    record_scan_duration(2.45)
-    record_llm_request_duration(0.35)
-    set_circuit_breaker_status(1)
-    set_circuit_breaker_status(0)
-
-    # Test server start function returns boolean gracefully
-    server_status = start_metrics_server(8000)
-    assert isinstance(server_status, bool)
 
 
 def test_blue_team_backward_compatibility():

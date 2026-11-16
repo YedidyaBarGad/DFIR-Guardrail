@@ -47,8 +47,6 @@ class Config:
     log_level: str = "INFO"
     log_format: str = "json"
     log_file: str = "guardrail_execution.log"
-    prometheus_enabled: bool = False
-    prometheus_port: int = 8000
     max_file_size_mb: int = 50
     shannon_entropy_threshold: float = 4.5
     semantic_similarity_threshold: float = 0.45
@@ -68,8 +66,6 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             log_format=os.getenv("LOG_FORMAT", "json").lower(),
             log_file=os.getenv("LOG_FILE", "guardrail_execution.log"),
-            prometheus_enabled=_get_bool("PROMETHEUS_ENABLED", False),
-            prometheus_port=_get_int("PROMETHEUS_PORT", 8000),
             max_file_size_mb=_get_int("MAX_FILE_SIZE_MB", 50),
             shannon_entropy_threshold=_get_float("SHANNON_ENTROPY_THRESHOLD", 4.5),
             semantic_similarity_threshold=_get_float(

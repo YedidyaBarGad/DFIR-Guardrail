@@ -9,12 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from src.blue_team import BlueTeamGuardrail
 from src.config import get_settings
 from src.logger import get_logger
-from src.metrics import (
-    record_artifact_scanned,
-    record_scan_duration,
-    record_threat_detected,
-    start_metrics_server,
-)
 from src.parsers.ecs_normalizer import ECSNormalizer
 from src.parsers.factory import load_forensic_data
 from src.red_team import RedTeamPoisoner
@@ -85,7 +79,6 @@ async def analyze_single(
             f"Item {idx} could not be analyzed: {e!r}",
             extra={"event_type": "item_error", "index": idx, "error": repr(e)},
         )
-        record_artifact_scanned(source="unknown", status="error")
         entry = {
             "id": idx + 1,
             "verdict": "Suspicious (Inference Error / Potential Bypass)",
@@ -139,16 +132,8 @@ async def _analyze(
         content = item["content"]
 
     is_threat = predicted_class == 1 or predicted_class == -1
-    scan_status = (
-        "threat"
-        if predicted_class == 1
-        else ("error" if predicted_class == -1 else "benign")
-    )
-    record_artifact_scanned(source=source_file, status=scan_status)
-
     if predicted_class == 1:
         verdict = "Malicious (Prompt Injection Detected)"
-        record_threat_detected(threat_type="prompt_injection")
         logger.warning(
             f"Threat detected: Prompt injection in artifact {artifact_id}",
             extra={
@@ -160,7 +145,6 @@ async def _analyze(
         )
     elif predicted_class == -1:
         verdict = "Suspicious (Inference Error / Potential Bypass)"
-        record_threat_detected(threat_type="fail_closed_error")
         logger.warning(
             f"Threat flagged under fail-closed: Inference error in artifact {artifact_id}",
             extra={
@@ -265,7 +249,6 @@ async def run_guardrail_scan_async(
     analyst_report["findings"].sort(key=lambda f: f["id"])
     total = metadata["total_artifacts_scanned"]
     elapsed = time.time() - start_time
-    record_scan_duration(elapsed)
     metadata["scan_time_seconds"] = round(elapsed, 2)
     throughput = total / elapsed if elapsed > 0 else 0
 
@@ -322,6 +305,7 @@ def print_run_config(blue_team: BlueTeamGuardrail, concurrency: int) -> None:
     )
     print(
         f"prefilter={'off' if blue_team.skip_prefilter else 'on'} "
+        f"gate={'legacy' if blue_team.legacy_gate else 'v2'} "
         f"embedder={'on' if blue_team.embedder is not None else 'off'} "
         f"concurrency={concurrency} (set OLLAMA_NUM_PARALLEL on the daemon to match)"
     )
@@ -357,7 +341,7 @@ async def async_main() -> int:
         type=str,
         choices=["sim", "ops", "compare"],
         default="sim",
-        help="Mode: 'sim' for synthetic dataset generation, 'ops' for real JSON scanning, 'compare' for benchmark.",
+        help="Mode: 'sim' for synthetic dataset generation, 'ops' (EXPERIMENTAL, unvalidated) for real forensic exports,'compare' for benchmark.",
     )
     parser.add_argument(
         "--concurrency",
@@ -375,29 +359,14 @@ async def async_main() -> int:
         action="store_true",
         help="Send every artifact to the LLM (skip the heuristic pre-filter) to measure the model alone.",
     )
+    parser.add_argument(
+        "--legacy_gate",
+        action="store_true",
+        help="Use the pre-v2 gate (pre-filter decides what the LLM sees; the LLM may veto). Reproduces the published runs.",
+    )
     args = parser.parse_args()
 
     print("--- Starting DFIR-Guardrail Pipeline ---")
-
-    # Start live Prometheus metrics exporter if configured
-    if config.prometheus_enabled:
-        started = start_metrics_server(config.prometheus_port)
-        if started:
-            logger.info(
-                f"Prometheus metrics exporter started on port {config.prometheus_port}",
-                extra={
-                    "event_type": "metrics_server_started",
-                    "port": config.prometheus_port,
-                },
-            )
-        else:
-            logger.warning(
-                f"Failed to bind Prometheus exporter on port {config.prometheus_port} or client not installed",
-                extra={
-                    "event_type": "metrics_server_skipped",
-                    "port": config.prometheus_port,
-                },
-            )
 
     blue_team = BlueTeamGuardrail(
         ollama_host=config.llm_endpoint,
@@ -407,11 +376,16 @@ async def async_main() -> int:
     )
 
     blue_team.skip_prefilter = args.no_prefilter
+    blue_team.legacy_gate = args.legacy_gate
     skipped: List[Dict[str, str]] = []
     if args.input_dir or args.mode == "ops":
         if not args.input_dir:
             print("Error: --input_dir must be specified in 'ops' mode.")
             return 2
+        print(
+            "WARNING: ops mode is experimental. The parsers have not been run on real "
+            "forensic exports, and detection rates were measured only in sim mode."
+        )
         if not os.path.exists(args.input_dir):
             print(f"Error: input path does not exist: {args.input_dir}")
             return 2
