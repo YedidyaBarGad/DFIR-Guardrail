@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:  # manual run adds the live-model job
+  schedule:
+    - cron: "0 6 * * 1"  # weekly, so a model or Ollama regression is noticed
 
 jobs:
   unit-tests:
@@ -24,8 +26,8 @@ jobs:
       run: pytest -q tests/
 
   live-model:
-    # CPU-only runner: slow, so run on demand instead of on every push
-    if: github.event_name == 'workflow_dispatch'
+    # CPU-only runner: slow, so run weekly or on demand instead of on every push
+    if: github.event_name != 'push' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     services:
       ollama:

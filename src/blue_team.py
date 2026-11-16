@@ -301,6 +301,7 @@ class BlueTeamGuardrail:
         self.concurrency = concurrency
         self.semaphore = asyncio.Semaphore(concurrency)
         self.active_requests = 0
+        self.embedder_failures = 0
         self.skip_prefilter = (
             False  # True = every artifact goes to the LLM (model-only evaluation)
         )
@@ -475,10 +476,15 @@ class BlueTeamGuardrail:
                     return True
             except Exception as e:
                 # Fail closed like the LLM stage: a broken embedder must not mark text benign
-                logger.warning(
-                    f"Semantic check failed ({e}); treating artifact as suspicious.",
-                    extra={"event_type": "semantic_check_error", "error": str(e)},
-                )
+                self.embedder_failures += 1
+                if (
+                    self.embedder_failures % 100 == 1
+                ):  # a dead embedder must not flood the log
+                    logger.warning(
+                        f"Semantic check failed ({e}); treating artifacts as suspicious "
+                        f"({self.embedder_failures} failures so far).",
+                        extra={"event_type": "semantic_check_error", "error": str(e)},
+                    )
                 return True
         # Rules run in both modes, so online and offline pre-filters agree
         return HEURISTIC_REGEX.search(analyzable_text) is not None
