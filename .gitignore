@@ -19,3 +19,6 @@ guardrail_execution.log*
 
 # Raw experiment results are committed on purpose
 !results/**
+
+# Colab upload bundles (regenerable snapshots of src/ + data/)
+*_bundle.zip

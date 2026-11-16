@@ -67,7 +67,7 @@ Config comes from environment variables (`src/config.py`); logs are JSON lines (
 
 The pipeline targets a single 16 GB GPU (e.g. Colab T4) and a small local model. On a CPU-only machine LLM requests time out, and timeouts are scored as detections, which invalidates results.
 
-**Colab:** open `notebooks/colab_demo.ipynb` and choose Runtime > Run All. It installs Ollama, pulls `phi3:mini`, warms the GPU and runs the comparison. The evaluation notebooks (below) ask you to upload a bundle of the local `src/`.
+**Colab:** open `notebooks/colab_demo.ipynb` and choose Runtime > Run All. It installs Ollama, pulls `phi3:mini`, warms the GPU and runs the comparison. The ablation and external notebooks ask you to upload a bundle of the local `src/`; the `hard.json` and attack-success notebooks clone the repo and refuse to run if `src/` differs from the gate v2 freeze.
 
 **Locally:** install and start Ollama, then:
 
@@ -111,7 +111,8 @@ python -m src.pipeline --mode ops --input_dir /path/to/json --output_dir /path/t
 | `notebooks/ablation_eval.ipynb` | synthetic ablation (`results/ablation_4096/`) |
 | `notebooks/external_eval.ipynb` | external-dataset runs (`results/external/`) |
 | `notebooks/padding_probe.ipynb` | padding probe (`results/padding_probe.csv`) |
-| `notebooks/colab_hard_eval.ipynb` | `hard.json` run |
+| `notebooks/colab_hard_eval.ipynb` | `hard.json` test run, gate v2 and model-only (`results/hard/`) |
+| `notebooks/attack_success_eval.ipynb` | attack success on held-out carriers and payloads (`results/attack_success/`) |
 | `python -m scripts.gate_v2_offline` | gate v2 estimate from stored runs (no GPU) |
 
 The ablation and external notebooks now run three conditions: `prefilter_on` (`--legacy_gate`, the published numbers), `gate_v2` and `model_only`.
