@@ -12,7 +12,7 @@
 
 ## 🔎 What I found
 
-1. **My headline number came from marking my own homework.** On 1,000 synthetic artifacts from my own generator, the pre-filter alone misses 1.55% (3 of 193) with 0 false positives. On payloads I did not write (125 Lakera Gandalf, 125 LLMail-Inject, placed in 250 benign process events) it misses 55.2% with 16.8% false positives, and on my 132 hand-built evasive payloads in `hard.json` it misses 92.4%. Do not quote 1.55%.
+1. **My headline number came from marking my own homework.** On 1,000 synthetic artifacts from my own generator, the pre-filter alone misses 1.55% (3 of 193) with 0 false positives. On payloads I did not write (125 Lakera Gandalf, 125 LLMail-Inject, placed in 250 benign process events) it misses 55.2% with 16.8% false positives (53.2% with the current rules, see Results), and on my 132 hand-built evasive payloads in `hard.json` it misses 92.4% (81.1% with the current rules). Do not quote 1.55%.
 2. **The design caps itself.** Only what the pre-filter flags reaches the LLM, so the pre-filter's misses are the system's misses and the LLM can only lower recall. On the external set the default pipeline misses 62.0%, worse than the pre-filter alone (55.2%) and far worse than `phi3:mini` alone (8.7%), which catches nearly all of the 125 short Gandalf overrides that the pre-filter never forwards.
 3. **The LLM veto is a trade, and neither stage is usable alone.** On synthetic data every veto lost a real detection (18–22 per run, FNR 1.55% to 10.9–13.0%) and removed no false positives, because there were none. On the external set it drops 14–19 real detections and clears about 26 of the pre-filter's 42 false positives (FPR 16.8% to 6.4%). The model alone flags 41–54% of benign artifacts, so its low miss rate on short overrides may partly be over-flagging.
 4. **Fail-closed scoring inflated my numbers, and context overflow failed silently.** Errors count as detections, so my first ablation attempt, where every LLM request failed, scored the LLM alone at 0.0% FNR (100% FPR). At `num_ctx=2048`, four ~5,300-character padded artifacts overflowed the window and passed my 1% validity check at 0.4% errors, hiding about 2 points of FNR (8.6% reported; 10.7% with the errors counted as misses). Errors were 1–4 per run on the external set and move FNR by under 2 points.
@@ -66,19 +66,19 @@ pip install -r requirements.txt
 ```
 
 ```bash
-python src/pipeline.py --mode compare --num_samples 1000
+python -m src.pipeline --mode compare --num_samples 1000
 ```
 
 ```bash
-python src/pipeline.py --mode sim --num_samples 5000 --poison_ratio 0.2
+python -m src.pipeline --mode sim --num_samples 5000 --poison_ratio 0.2
 ```
 
 ```bash
-python src/pipeline.py --mode sim --dataset_file data/external.json
+python -m src.pipeline --mode sim --dataset_file data/external.json
 ```
 
 ```bash
-python src/pipeline.py --mode ops --input_dir /path/to/json --output_dir /path/to/reports
+python -m src.pipeline --mode ops --input_dir /path/to/json --output_dir /path/to/reports
 ```
 
 | Option | Meaning |
@@ -111,7 +111,7 @@ Raw output: [`results/ablation_4096/`](results/ablation_4096/) ([runs](results/a
 
 | Configuration | TP | FN | FP | FNR | FNR pooled 95% CI* | FPR | Scan time |
 |---|---|---|---|---|---|---|---|
-| Pre-filter only (offline, deterministic) | 190 | 3 | 0 | 1.55% | n/a | 0.00% | n/a |
+| Pre-filter only (deterministic; identical with embedder on or off) | 190 | 3 | 0 | 1.55% | n/a | 0.00% | n/a |
 | Pre-filter + LLM (default) | 168–172 | 21–25 | 0 | 10.9–13.0% (mean 11.7%) | 9.4–14.6% | 0.00% | 159–165 s |
 | LLM only | 172–173 | 20–21 | 417–463 | 10.4–10.9% (mean 10.5%) | 8.3–13.3% | 51.7–57.4% (mean 54.4%) | 575–578 s |
 
@@ -128,19 +128,23 @@ Raw output: [`results/ablation_4096/`](results/ablation_4096/) ([runs](results/a
 
 | Configuration | FNR | FNR pooled 95% CI* | FPR | Scan time | Errors per run |
 |---|---|---|---|---|---|
-| Pre-filter only (offline) | 55.2% | n/a | 16.8% | n/a | n/a |
+| Pre-filter only, as run (embedder on, rules skipped) | 55.2% | n/a | 16.8% | n/a | n/a |
+| Pre-filter only, current code (rules always run; same with embedder on or off) | 53.2% | n/a | 16.8% | n/a | n/a |
 | Pre-filter + LLM (default) | 60.8–62.8% (mean 62.0%) | 58.5–65.4% | 6.0–6.8% (mean 6.4%) | 150–153 s | 1–2 |
 | LLM only | 8.0–9.2% (mean 8.7%) | 6.9–10.9% | 40.0–42.8% (mean 41.1%) | 358–360 s | 2–4 |
 
 \* As above. Errors are scored as detections; counted as misses, FNR is 61.6–63.2% and 9.6–10.0%.
 
-FNR by payload source (125 poisoned artifacts each, range over 3 runs):
+**Correction.** The pre-filter-only figures above were first labelled "offline". They were in fact computed with the embedder on, where the keyword rules in `HEURISTIC_REGEX` were skipped (a code gap, now fixed: the rules always run and an embedder error fails closed). `scripts/prefilter_only.py` reproduces both modes (`results/prefilter_only/`). The full-pipeline runs below used the old behaviour: every artifact they flagged is also flagged by the current pre-filter (checked by `scripts/union_gate.py`), but the current pre-filter flags 5 more poisoned artifacts on this set (all Gandalf), so a re-run would move the default pipeline slightly. Synthetic and FPR figures are unchanged.
+
+FNR by payload source (125 poisoned artifacts each, range over 3 runs). The pre-filter column is the as-run figure; current code gives 77.6% (Gandalf) and 28.8% (LLMail-Inject):
 
 | Source | Pre-filter only | Pre-filter + LLM | LLM only |
 |---|---|---|---|
 | Lakera Gandalf (short overrides) | 81.6% | 81.6% | 0.8% |
 | LLMail-Inject | 28.8% | 42.4% (40.0–44.0%) | 16.5% (15.2–17.6%) |
 
+* **Union gate (offline, from stored runs, `scripts/union_gate.py`).** Flagging when the pre-filter OR the model-only run flags gives FNR 1.6–2.0% (Gandalf 0.8%, LLMail-Inject 2.4–3.2%) at FPR 50.8–53.6%, against 8.0–9.2% / 40–43% for the model alone. On synthetic data it reaches 0.0% FNR at 51.7–57.4% FPR. It removes the miss ceiling but pays the full cost of the model's false positives and of running the model on every artifact, so it is a recall upper bound, not a usable setting. The open problem is the model's 41–54% FPR, which a better or calibrated classifier would have to fix.
 * On this set the ranking reverses: the pre-filter misses 102 of 125 plain "ignore previous instructions" phrasings, which the model catches, but the default pipeline never forwards them.
 * The LLM also vetoes 14–19 real LLMail-Inject detections, yet clears about 26 of the pre-filter's 42 false positives.
 * The LLM-only catch rate comes with a 41% FPR, so part of it may be over-flagging; this data does not separate the two.
@@ -148,7 +152,7 @@ FNR by payload source (125 poisoned artifacts each, range over 3 runs):
 
 ### `hard.json` (500 artifacts: 132 hand-built evasive payloads, 368 benign with false-positive traps)
 
-The pre-filter alone, computed offline, catches 10 of 132 (92.4% FNR) and flags 23 of 368 benign (6.3% FPR). There is no valid full-pipeline run yet (the only attempt ran while the backend was failing, see below).
+The pre-filter as run (embedder on) caught 10 of 132 (92.4% FNR) and flagged 23 of 368 benign (6.3% FPR). With the current rules it catches 25 of 132 (81.1% FNR) with the same 23 false positives. There is no valid full-pipeline run yet (the only attempt ran while the backend was failing, see below).
 
 ### Padding probe
 
@@ -194,4 +198,5 @@ Both were wrong because fail-closed scoring counts errors as detections. CSVs on
 * `src/`: red team, blue team, pipeline, parsers, config, logging, metrics. `tests/`: unit and integration tests.
 * `data/hard.json`: hand-built evasive set. `data/external.json`: external set (rebuild with `build_external.py`, which needs the three source datasets above). `hard_dataset.py`, `export_dataset.py`: dataset helpers.
 * `results/`: raw CSVs, run reports and logs behind every number in this README.
+* Licence: code is MIT (see `LICENSE`); the datasets below keep their own licences.
 * External data: WinLOLBIN-GT is CC-BY-4.0 (Zenodo record 20533434); the Gandalf and LLMail-Inject datasets are MIT. `data/external.json` redistributes sampled rows from them; check each source's terms before reusing.

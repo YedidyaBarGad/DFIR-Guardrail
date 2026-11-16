@@ -468,13 +468,19 @@ class BlueTeamGuardrail:
 
                 emb = self.embedder.encode(analyzable_text)
                 similarities = cos_sim(emb, self.known_injections)
-                return (
+                if (
                     similarities.max().item()
                     > self.config.semantic_similarity_threshold
+                ):
+                    return True
+            except Exception as e:
+                # Fail closed like the LLM stage: a broken embedder must not mark text benign
+                logger.warning(
+                    f"Semantic check failed ({e}); treating artifact as suspicious.",
+                    extra={"event_type": "semantic_check_error", "error": str(e)},
                 )
-            except Exception:
-                return False
-        # Robust heuristic fallback for offline or air-gapped deployments
+                return True
+        # Rules run in both modes, so online and offline pre-filters agree
         return HEURISTIC_REGEX.search(analyzable_text) is not None
 
     def _trim(self, val: Any) -> Any:

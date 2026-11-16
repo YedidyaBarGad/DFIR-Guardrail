@@ -52,7 +52,9 @@ def llmail_texts(path):
 
 import pyarrow.parquet as pq  # noqa: E402
 
-gandalf = sorted({t for p in a.gandalf for t in pq.read_table(p).column("text").to_pylist()})
+gandalf = sorted(
+    {t for p in a.gandalf for t in pq.read_table(p).column("text").to_pylist()}
+)
 llmail = sorted(set(llmail_texts(a.llmail)))
 print(f"pool: gandalf={len(gandalf)} llmail={len(llmail)} benign={len(benign)}")
 payloads = [("gandalf", p) for p in rng.sample(gandalf, a.n_each)] + [
@@ -65,11 +67,11 @@ data = []
 for (src, payload), art in zip(payloads, carriers):
     field = rng.choice(["CommandLine", "ParentCommandLine"])
     art = dict(art)
-    art[field] = rng.choice(
-        [f"{art[field]} {payload}", f"{payload} {art[field]}"]
-    )
+    art[field] = rng.choice([f"{art[field]} {payload}", f"{payload} {art[field]}"])
     data.append({"artifact": art, "is_malicious": True, "source": src})
-data += [{"artifact": r, "is_malicious": False, "source": "winlolbin_gt"} for r in clean]
+data += [
+    {"artifact": r, "is_malicious": False, "source": "winlolbin_gt"} for r in clean
+]
 rng.shuffle(data)
 for i, d in enumerate(data):
     d["id"] = i

@@ -77,6 +77,35 @@ def load_real_data(
 async def analyze_single(
     idx: int, item: dict, blue_team: BlueTeamGuardrail, is_simulation: bool
 ) -> Tuple[Optional[dict], dict, bool]:
+    """Analyze one artifact; any failure becomes a fail-closed error so one bad item cannot kill the scan."""
+    try:
+        return await _analyze(idx, item, blue_team, is_simulation)
+    except Exception as e:
+        logger.error(
+            f"Item {idx} could not be analyzed: {e!r}",
+            extra={"event_type": "item_error", "index": idx, "error": repr(e)},
+        )
+        record_artifact_scanned(source="unknown", status="error")
+        entry = {
+            "id": idx + 1,
+            "verdict": "Suspicious (Inference Error / Potential Bypass)",
+            "error_detail": f"Item could not be analyzed ({e!r}). Flagged under fail-closed.",
+        }
+        result = None
+        if is_simulation:
+            malicious = isinstance(item, dict) and item.get("is_malicious")
+            entry["ground_truth"] = "Malicious" if malicious else "Benign"
+            result = {
+                "id": item.get("id", idx) if isinstance(item, dict) else idx,
+                "true_label": 1 if malicious else 0,
+                "predicted_label": -1,
+            }
+        return result, entry, True
+
+
+async def _analyze(
+    idx: int, item: dict, blue_team: BlueTeamGuardrail, is_simulation: bool
+) -> Tuple[Optional[dict], dict, bool]:
     """Analyze a single artifact, update Prometheus metrics, and generate report findings."""
     if is_simulation:
         artifact = item["artifact"]
