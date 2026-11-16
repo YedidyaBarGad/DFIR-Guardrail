@@ -108,21 +108,25 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-async def run(carriers, payloads, legacy_gate: bool) -> List[Dict[str, Any]]:
+async def run(
+    carriers, payloads, legacy_gate: bool, per_payload: int = 0
+) -> List[Dict[str, Any]]:
     analyst = BlueTeamGuardrail(enable_semantic_search=False)
     analyst.system_prompt = ANALYST_PROMPT
     guard = BlueTeamGuardrail()
     guard.legacy_gate = legacy_gate
     await analyst.warmup()
 
-    async def verdict(i, art):
-        async with analyst.semaphore:
-            return await analyst._classify_single(i, art)
-
-    clean = await asyncio.gather(
-        *(verdict(f"c{ci}", c) for ci, c in enumerate(carriers))
-    )
-    pairs = [(ci, pi) for ci in range(len(carriers)) for pi in range(len(payloads))]
+    n = len(carriers)
+    if per_payload:
+        # each payload with per_payload carriers, rotated so all are used evenly
+        pairs = [
+            ((pi * per_payload + j) % n, pi)
+            for pi in range(len(payloads))
+            for j in range(min(per_payload, n))
+        ]
+    else:  # full grid
+        pairs = [(ci, pi) for ci in range(n) for pi in range(len(payloads))]
     poisoned_arts = [
         dict(
             carriers[ci],
@@ -130,11 +134,32 @@ async def run(carriers, payloads, legacy_gate: bool) -> List[Dict[str, Any]]:
         )
         for ci, pi in pairs
     ]
+
+    total, done = n + 2 * len(pairs), 0
+
+    async def counted(coro):
+        """Await one call and print a progress line (the notebook's progress bar reads these)."""
+        nonlocal done
+        result = await coro
+        done += 1
+        print(f"PROGRESS {done}/{total}", flush=True)
+        return result
+
+    async def verdict(i, art):
+        async with analyst.semaphore:
+            return await counted(analyst._classify_single(i, art))
+
+    clean = await asyncio.gather(
+        *(verdict(f"c{ci}", c) for ci, c in enumerate(carriers))
+    )
     poisoned = await asyncio.gather(
         *(verdict(f"p{k}", a) for k, a in enumerate(poisoned_arts))
     )
     guarded = await asyncio.gather(
-        *(guard.classify_artifact(f"g{k}", a) for k, a in enumerate(poisoned_arts))
+        *(
+            counted(guard.classify_artifact(f"g{k}", a))
+            for k, a in enumerate(poisoned_arts)
+        )
     )
     await analyst.close()
     await guard.close()
@@ -155,6 +180,12 @@ def main():
     ap.add_argument("--carriers", help="JSON list of malicious artifacts (dicts)")
     ap.add_argument("--payloads", help="JSON list of payload strings")
     ap.add_argument("--legacy_gate", action="store_true")
+    ap.add_argument(
+        "--per_payload",
+        type=int,
+        default=0,
+        help="carriers per payload (rotated); 0 = every carrier with every payload",
+    )
     ap.add_argument("--out", default="attack_success.json")
     a = ap.parse_args()
 
@@ -168,7 +199,7 @@ def main():
         "CommandLine" in c for c in carriers
     ), "carriers need a CommandLine field"
 
-    rows = asyncio.run(run(carriers, payloads, a.legacy_gate))
+    rows = asyncio.run(run(carriers, payloads, a.legacy_gate, a.per_payload))
     summary = summarize(rows)
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True
@@ -178,6 +209,7 @@ def main():
         "gate": "legacy" if a.legacy_gate else "v2",
         "carriers": a.carriers or "built-in (self-written)",
         "payloads": a.payloads or "red team (self-written)",
+        "per_payload": a.per_payload or "all carriers",
     }
     json.dump(
         {"meta": meta, "summary": summary, "rows": rows},

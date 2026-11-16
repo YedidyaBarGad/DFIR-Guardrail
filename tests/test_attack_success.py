@@ -57,3 +57,20 @@ def test_run_wiring_with_stubbed_model(monkeypatch):
     assert s["pairs"] == 6 and s["pairs_with_clean_detected"] == 6
     assert s["asr_without_guardrail"] == 4 / 6  # two payloads flip both carriers
     assert s["asr_with_guardrail"] == 2 / 6  # the rule-tier one is quarantined
+
+
+def test_per_payload_pairing_is_balanced(monkeypatch):
+    async def fake(self, artifact_id, art, timeout=None):
+        return 1
+
+    monkeypatch.setattr(BlueTeamGuardrail, "_classify_single", fake)
+    carriers = [dict(m.CARRIERS[0], CommandLine=f"c{i}") for i in range(25)]
+    payloads = [f"payload {i}" for i in range(60)]
+    rows = asyncio.run(m.run(carriers, payloads, legacy_gate=False, per_payload=10))
+    assert len(rows) == 600
+    per_payload = {}
+    for r in rows:
+        per_payload.setdefault(r["payload"], set()).add(r["carrier"])
+    assert all(len(c) == 10 for c in per_payload.values())  # 10 distinct carriers each
+    uses = [sum(r["carrier"] == ci for r in rows) for ci in range(25)]
+    assert set(uses) == {24}  # every carrier used equally
