@@ -25,6 +25,21 @@ def test_summarize_counts_only_flippable_pairs():
     assert s["asr_with_guardrail"] == 1 / 3
 
 
+def test_summarize_reports_guard_errors_both_ways():
+    rows = [
+        {
+            "clean": 1,
+            "poisoned": 0,
+            "guard": -1,
+        },  # flipped; guard errored (fail closed)
+        {"clean": 1, "poisoned": 0, "guard": 0},  # flipped and passed
+    ]
+    s = summarize(rows)
+    assert s["guard_errors"] == 1
+    assert s["asr_with_guardrail"] == 1 / 2
+    assert s["asr_with_guardrail_errors_as_pass"] == 1
+
+
 def test_run_wiring_with_stubbed_model(monkeypatch):
     async def fake(self, artifact_id, art, timeout=None):
         if self.system_prompt != m.ANALYST_PROMPT:
