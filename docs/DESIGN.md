@@ -15,20 +15,21 @@ Generates a synthetic dataset of Amcache/Prefetch-style artifacts and injects pa
 
 ## ⚙️ Pipeline (`src/pipeline.py`)
 
-* **`ops` (experimental, unvalidated):** parses forensic exports (`src/parsers/`), normalizes them to Elastic Common Schema, scans high-risk fields and writes a JSON analyst report. The parsers have unit tests only; `ops` has never been run on real or public sample forensic data, and no published number comes from it. The CLI prints a warning when you use it.
 * **`sim`:** generates (or loads, with `--dataset_file`) poisoned and benign artifacts and reports FPR and FNR.
 * **`compare`:** times the sequential scanner against the bounded-concurrency one.
 
-Config comes from environment variables (`src/config.py`); logs are JSON lines (`src/logger.py`), which is a convenience, not a tested SIEM integration.
+Config comes from environment variables (`src/config.py`); logs are JSON lines (`src/logger.py`).
+
+The project scores labelled datasets only. An earlier `ops` mode with parsers for forensic exports (EVTX, CSV, XML, JSON) and ECS normalization was removed because it was never run on real data; see git history before the removal commit.
 
 ## CLI options
 
 | Option | Meaning |
 |---|---|
-| `--mode` | `sim` (default), `ops` or `compare` |
+| `--mode` | `sim` (default) or `compare` |
 | `--concurrency` | simultaneous LLM requests (default from `src/config.py`); pair with `OLLAMA_NUM_PARALLEL` |
-| `--input_dir` / `--output_dir` | ops input; where `guardrail_analysis.json` / `guardrail_simulation.json` are written |
+| `--output_dir` | where `guardrail_simulation.json` is written |
 | `--num_samples`, `--poison_ratio` | synthetic dataset size (default 50) and poisoned share (default 0.2) |
-| `--dataset_file` | sim only: JSON list of `{id, artifact, is_malicious}` to score instead of generating |
+| `--dataset_file` | JSON list of `{id, artifact, is_malicious}` to score instead of generating |
 | `--no_prefilter` | send every artifact to the LLM |
 | `--legacy_gate` | pre-v2 gate (pre-filter gates the LLM, LLM may veto); reproduces the published runs |

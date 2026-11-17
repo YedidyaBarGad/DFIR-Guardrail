@@ -36,9 +36,7 @@ def test_malformed_item_does_not_abort_scan():
         {"id": 1, "is_malicious": True},  # no "artifact" key
         {"id": 2, "artifact": {"a": "y"}, "is_malicious": True},
     ]
-    results, report = asyncio.run(
-        run_guardrail_scan_async(data, _Stub(1), is_simulation=True)
-    )
+    results, report = asyncio.run(run_guardrail_scan_async(data, _Stub(1)))
     assert report["metadata"]["total_artifacts_scanned"] == 3
     assert any(r["predicted_label"] == -1 for r in results)
     assert report["metadata"]["metrics"]["Errors"] == 1

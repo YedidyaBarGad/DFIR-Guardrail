@@ -1,35 +1,7 @@
 import asyncio
-import json
-
 import pytest
 
 from src.blue_team import BlueTeamGuardrail
-from src.pipeline import load_real_data
-
-
-def _write(tmp_path, name, text):
-    p = tmp_path / name
-    p.write_text(text, encoding="utf-8")
-    return str(p)
-
-
-def test_float_fields_survive_report_dump(tmp_path):
-    recs = load_real_data(
-        _write(tmp_path, "a.json", '[{"CommandLine":"x","Score":1.5}]')
-    )
-    json.dumps(recs[0]["ecs"])  # raises on Decimal
-
-
-def test_flat_record_with_nested_dict_keeps_top_level(tmp_path):
-    recs = load_real_data(
-        _write(tmp_path, "b.json", '{"CommandLine":"evil","Meta":{"a":"1"}}')
-    )
-    assert recs and recs[0]["content"]["process.command_line"] == "evil"
-
-
-def test_record_without_known_fields_is_still_scanned(tmp_path):
-    recs = load_real_data(_write(tmp_path, "c.json", '[{"Comment":"ignore previous"}]'))
-    assert len(recs) == 1
 
 
 def test_invisible_chars_do_not_hide_roleplay():

@@ -9,8 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from src.blue_team import BlueTeamGuardrail
 from src.config import get_settings
 from src.logger import get_logger
-from src.parsers.ecs_normalizer import ECSNormalizer
-from src.parsers.factory import load_forensic_data
 from src.red_team import RedTeamPoisoner
 
 logger = get_logger("dfir_guardrail.pipeline")
@@ -51,29 +49,12 @@ def compute_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def extract_high_risk_fields(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract known high-risk execution and metadata fields normalized to Elastic Common Schema (ECS)."""
-    normalizer = ECSNormalizer()
-    ecs_record = normalizer.normalize(item)
-    return normalizer.extract_high_risk_ecs(ecs_record)
-
-
-def load_real_data(
-    input_path: str, skipped: Optional[List[Dict[str, str]]] = None
-) -> List[Dict[str, Any]]:
-    """Parse multi-format forensic artifacts from a file or directory into a list (small inputs, tests).
-
-    Large inputs should iterate `load_forensic_data` directly so memory stays flat.
-    """
-    return list(load_forensic_data(input_path, skipped=skipped))
-
-
 async def analyze_single(
-    idx: int, item: dict, blue_team: BlueTeamGuardrail, is_simulation: bool
+    idx: int, item: dict, blue_team: BlueTeamGuardrail
 ) -> Tuple[Optional[dict], dict, bool]:
     """Analyze one artifact; any failure becomes a fail-closed error so one bad item cannot kill the scan."""
     try:
-        return await _analyze(idx, item, blue_team, is_simulation)
+        return await _analyze(idx, item, blue_team)
     except Exception as e:
         logger.error(
             f"Item {idx} could not be analyzed: {e!r}",
@@ -84,52 +65,30 @@ async def analyze_single(
             "verdict": "Suspicious (Inference Error / Potential Bypass)",
             "error_detail": f"Item could not be analyzed ({e!r}). Flagged under fail-closed.",
         }
-        result = None
-        if is_simulation:
-            malicious = isinstance(item, dict) and item.get("is_malicious")
-            entry["ground_truth"] = "Malicious" if malicious else "Benign"
-            result = {
-                "id": item.get("id", idx) if isinstance(item, dict) else idx,
-                "true_label": 1 if malicious else 0,
-                "predicted_label": -1,
-            }
+        malicious = isinstance(item, dict) and item.get("is_malicious")
+        entry["ground_truth"] = "Malicious" if malicious else "Benign"
+        result = {
+            "id": item.get("id", idx) if isinstance(item, dict) else idx,
+            "true_label": 1 if malicious else 0,
+            "predicted_label": -1,
+        }
         return result, entry, True
 
 
 async def _analyze(
-    idx: int, item: dict, blue_team: BlueTeamGuardrail, is_simulation: bool
+    idx: int, item: dict, blue_team: BlueTeamGuardrail
 ) -> Tuple[Optional[dict], dict, bool]:
-    """Analyze a single artifact, update Prometheus metrics, and generate report findings."""
-    if is_simulation:
-        artifact = item["artifact"]
-        artifact_id = f"sim_{idx}"
-        predicted_class = await blue_team.classify_artifact(artifact_id, artifact)
-
-        result = {
-            "id": item["id"],
-            "true_label": 1 if item["is_malicious"] else 0,
-            "predicted_label": predicted_class,
-        }
-        source_file = "simulation"
-        content = artifact
-    else:
-        # Send high-risk fields plus unmapped fields once; the full ECS record
-        # repeats every value 2-3x and overflows the model's context window.
-        artifact_for_model = {
-            "Source": item["artifact_source"],
-            "Content": item["content"],
-        }
-        custom = item.get("ecs", {}).get("custom")
-        if custom:
-            artifact_for_model["Custom"] = custom
-        artifact_id = item["id"]
-        predicted_class = await blue_team.classify_artifact(
-            artifact_id, artifact_for_model
-        )
-
-        result = None
-        source_file = item["artifact_source"]
-        content = item["content"]
+    """Analyze a single labelled artifact and build its report finding."""
+    artifact = item["artifact"]
+    artifact_id = f"sim_{idx}"
+    predicted_class = await blue_team.classify_artifact(artifact_id, artifact)
+    result = {
+        "id": item["id"],
+        "true_label": 1 if item["is_malicious"] else 0,
+        "predicted_label": predicted_class,
+    }
+    source_file = "simulation"
+    content = artifact
 
     is_threat = predicted_class == 1 or predicted_class == -1
     if predicted_class == 1:
@@ -157,14 +116,11 @@ async def _analyze(
     else:
         verdict = "Safe (Benign)"
 
-    report_entry = {"id": idx + 1, "verdict": verdict}
-
-    if not is_simulation:
-        report_entry["source_file"] = source_file
-        if "ecs" in item:
-            report_entry["ecs"] = item["ecs"]
-    else:
-        report_entry["ground_truth"] = "Malicious" if item["is_malicious"] else "Benign"
+    report_entry = {
+        "id": idx + 1,
+        "verdict": verdict,
+        "ground_truth": "Malicious" if item["is_malicious"] else "Benign",
+    }
 
     if is_threat:
         report_entry["suspicious_content"] = content
@@ -179,23 +135,17 @@ async def _analyze(
 async def run_guardrail_scan_async(
     dataset: Iterable[dict],
     blue_team: BlueTeamGuardrail,
-    is_simulation: bool = False,
     mode: str = "async",
 ) -> Tuple[List[dict], dict]:
-    """Scan an iterable of artifacts with a bounded window of in-flight tasks.
-
-    Memory stays flat for generators: only `window` items are alive at once. Simulation
-    reports keep every finding; ops reports keep threats only (benign items are counted).
-    """
+    """Scan an iterable of labelled artifacts with a bounded window of in-flight tasks."""
     from tqdm import tqdm
 
     metadata = {
         "scan_time_seconds": 0,
         "total_artifacts_scanned": 0,
         "threats_detected": 0,
+        "metrics": {},
     }
-    if is_simulation:
-        metadata["metrics"] = {}
     analyst_report = {"metadata": metadata, "findings": []}
     results: List[dict] = []
 
@@ -205,7 +155,6 @@ async def run_guardrail_scan_async(
         extra={
             "event_type": "scan_start",
             "mode": mode,
-            "is_simulation": is_simulation,
         },
     )
 
@@ -220,17 +169,12 @@ async def run_guardrail_scan_async(
             results.append(res)
         if is_threat:
             metadata["threats_detected"] += 1
-        if is_simulation or is_threat:
-            analyst_report["findings"].append(rep)
+        analyst_report["findings"].append(rep)
         pbar.update(1)
 
     try:
         for idx, item in enumerate(dataset):
-            pending.add(
-                asyncio.ensure_future(
-                    analyze_single(idx, item, blue_team, is_simulation)
-                )
-            )
+            pending.add(asyncio.ensure_future(analyze_single(idx, item, blue_team)))
             if len(pending) >= window:
                 done, pending = await asyncio.wait(
                     pending, return_when=asyncio.FIRST_COMPLETED
@@ -265,8 +209,7 @@ async def run_guardrail_scan_async(
         f"\nScan completed in {elapsed:.2f} seconds. Throughput: {throughput:.2f} items/sec."
     )
 
-    if is_simulation:
-        metadata["metrics"] = compute_metrics(results)
+    metadata["metrics"] = compute_metrics(results)
 
     return results, analyst_report
 
@@ -317,11 +260,6 @@ async def async_main() -> int:
 
     parser = argparse.ArgumentParser(description="DFIR-Guardrail Pipeline")
     parser.add_argument(
-        "--input_dir",
-        type=str,
-        help="Path to parsed artifacts from KAPE, Velociraptor, or forensic logs (directory or single file: JSON, CSV, XML, EVTX) for analysis",
-    )
-    parser.add_argument(
         "--output_dir", type=str, help="Path to save the validation results"
     )
     parser.add_argument(
@@ -339,9 +277,9 @@ async def async_main() -> int:
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["sim", "ops", "compare"],
+        choices=["sim", "compare"],
         default="sim",
-        help="Mode: 'sim' for synthetic dataset generation, 'ops' (EXPERIMENTAL, unvalidated) for real forensic exports,'compare' for benchmark.",
+        help="Mode: 'sim' scores a labelled dataset; 'compare' times sequential vs bounded-concurrency scans.",
     )
     parser.add_argument(
         "--concurrency",
@@ -377,35 +315,14 @@ async def async_main() -> int:
 
     blue_team.skip_prefilter = args.no_prefilter
     blue_team.legacy_gate = args.legacy_gate
-    skipped: List[Dict[str, str]] = []
-    if args.input_dir or args.mode == "ops":
-        if not args.input_dir:
-            print("Error: --input_dir must be specified in 'ops' mode.")
-            return 2
-        print(
-            "WARNING: ops mode is experimental. The parsers have not been run on real "
-            "forensic exports, and detection rates were measured only in sim mode."
-        )
-        if not os.path.exists(args.input_dir):
-            print(f"Error: input path does not exist: {args.input_dir}")
-            return 2
-        dataset = load_forensic_data(args.input_dir, skipped=skipped)
-        if args.mode == "compare":
-            dataset = list(dataset)  # compare scans the data twice
-        is_sim = False
-    elif args.dataset_file:
+    if args.dataset_file:
         with open(args.dataset_file, encoding="utf-8") as f:
             dataset = json.load(f)
-        is_sim = True
     else:
-        red_team = RedTeamPoisoner()
-        dataset = red_team.generate_dataset(
+        dataset = RedTeamPoisoner().generate_dataset(
             num_samples=args.num_samples, poison_ratio=args.poison_ratio
         )
-        is_sim = True
-
-    if is_sim:
-        print(f"-> Generated {len(dataset)} items.")
+    print(f"-> Generated {len(dataset)} items.")
 
     # Warm up the LLM
     print("Warming up the LLM (Loading model into VRAM)...")
@@ -415,11 +332,11 @@ async def async_main() -> int:
     if args.mode == "compare":
         print("\n--- Running Pure Sequential Baseline ---")
         _, report_seq = await run_guardrail_scan_async(
-            dataset, blue_team, is_simulation=is_sim, mode="sequential"
+            dataset, blue_team, mode="sequential"
         )
         print("\n--- Running Async (bounded concurrency) ---")
         _, analyst_report = await run_guardrail_scan_async(
-            dataset, blue_team, is_simulation=is_sim, mode="async"
+            dataset, blue_team, mode="async"
         )
 
         print("\n--- Comparison Results ---")
@@ -432,55 +349,41 @@ async def async_main() -> int:
         if async_t > 0:
             print(f"{'Speedup':<25} | {'1.00x':<20} | {seq_t/async_t:<19.2f}x")
 
-        if is_sim:
-            seq_metrics = report_seq["metadata"]["metrics"]
-            batch_metrics = analyst_report["metadata"]["metrics"]
-            for k in seq_metrics.keys():
-                v_seq = seq_metrics[k]
-                v_batch = batch_metrics[k]
-                v_seq_str = f"{v_seq:.2%}" if isinstance(v_seq, float) else str(v_seq)
-                v_batch_str = (
-                    f"{v_batch:.2%}" if isinstance(v_batch, float) else str(v_batch)
-                )
-                print(f"{k:<25} | {v_seq_str:<20} | {v_batch_str:<20}")
-            warn_if_backend_failed(seq_metrics)
-            warn_if_backend_failed(batch_metrics)
+        seq_metrics = report_seq["metadata"]["metrics"]
+        batch_metrics = analyst_report["metadata"]["metrics"]
+        for k in seq_metrics.keys():
+            v_seq = seq_metrics[k]
+            v_batch = batch_metrics[k]
+            v_seq_str = f"{v_seq:.2%}" if isinstance(v_seq, float) else str(v_seq)
+            v_batch_str = (
+                f"{v_batch:.2%}" if isinstance(v_batch, float) else str(v_batch)
+            )
+            print(f"{k:<25} | {v_seq_str:<20} | {v_batch_str:<20}")
+        warn_if_backend_failed(seq_metrics)
+        warn_if_backend_failed(batch_metrics)
     else:
         _, analyst_report = await run_guardrail_scan_async(
-            dataset,
-            blue_team,
-            is_simulation=is_sim,
-            mode="async" if args.mode in ["sim", "ops"] else args.mode,
+            dataset, blue_team, mode="async"
         )
-        if is_sim:
-            print("\n--- Evaluation Metrics ---")
-            for k, v in analyst_report["metadata"]["metrics"].items():
-                if isinstance(v, float):
-                    print(f"{k}: {v:.2%}")
-                else:
-                    print(f"{k}: {v}")
-            warn_if_backend_failed(analyst_report["metadata"]["metrics"])
+        print("\n--- Evaluation Metrics ---")
+        for k, v in analyst_report["metadata"]["metrics"].items():
+            if isinstance(v, float):
+                print(f"{k}: {v:.2%}")
+            else:
+                print(f"{k}: {v}")
+        warn_if_backend_failed(analyst_report["metadata"]["metrics"])
 
-    total = analyst_report["metadata"]["total_artifacts_scanned"]
-    if total == 0 and not skipped:
+    if analyst_report["metadata"]["total_artifacts_scanned"] == 0:
         print("No valid data found.")
-    analyst_report["metadata"]["skipped_files"] = skipped
-    if skipped:
-        print(f"WARNING: {len(skipped)} file(s) were NOT fully scanned:")
-        for sk in skipped:
-            print(f"  [{sk['reason']}] {sk['filepath']}: {sk['detail']}")
 
     output_dir = args.output_dir or "."
     os.makedirs(output_dir, exist_ok=True)
-    filename = "guardrail_simulation.json" if is_sim else "guardrail_analysis.json"
-    output_path = os.path.join(output_dir, filename)
+    output_path = os.path.join(output_dir, "guardrail_simulation.json")
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(analyst_report, f, indent=4, default=str)
 
     await blue_team.close()
-    # Exit non-zero when a file was too big or unreadable: a clean report must not hide that
-    incomplete = any(sk["reason"] in ("size_limit", "parse_error") for sk in skipped)
-    return 1 if incomplete else 0
+    return 0
 
 
 if __name__ == "__main__":

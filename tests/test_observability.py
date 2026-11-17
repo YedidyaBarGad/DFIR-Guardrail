@@ -6,7 +6,7 @@ import pytest
 
 from src.blue_team import BlueTeamGuardrail
 from src.config import Config, get_settings
-from src.logger import SIEMJSONFormatter, get_logger
+from src.logger import JSONFormatter, get_logger
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +26,6 @@ def test_config_defaults():
     assert config.log_level == "INFO"
     assert config.log_format == "json"
     assert config.log_file == "guardrail_execution.log"
-    assert config.max_file_size_mb == 50
     assert config.shannon_entropy_threshold == 4.5
     assert config.semantic_similarity_threshold == 0.45
 
@@ -40,7 +39,6 @@ def test_config_environment_overrides(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("LOG_FORMAT", "text")
     monkeypatch.setenv("LOG_FILE", "custom_guardrail.log")
-    monkeypatch.setenv("MAX_FILE_SIZE_MB", "100")
     monkeypatch.setenv("SHANNON_ENTROPY_THRESHOLD", "5.2")
     monkeypatch.setenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.85")
 
@@ -52,15 +50,14 @@ def test_config_environment_overrides(monkeypatch):
     assert settings.log_level == "DEBUG"
     assert settings.log_format == "text"
     assert settings.log_file == "custom_guardrail.log"
-    assert settings.max_file_size_mb == 100
     assert settings.shannon_entropy_threshold == 5.2
     assert settings.semantic_similarity_threshold == 0.85
 
 
-def test_siem_json_log_formatting():
-    """Verify SIEM structured JSON formatting adhering to Splunk ingestion schema."""
-    formatter = SIEMJSONFormatter()
-    logger = logging.getLogger("test_siem_logger")
+def test_json_log_formatting():
+    """Verify structured JSON log lines carry the standard fields and extras."""
+    formatter = JSONFormatter()
+    logger = logging.getLogger("test_json_logger")
     record = logger.makeRecord(
         name="dfir_guardrail.test",
         level=logging.WARNING,

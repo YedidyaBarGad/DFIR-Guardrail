@@ -76,20 +76,20 @@ python -m src.pipeline --mode sim --dataset_file data/hard.json
 | `notebooks/external_eval.ipynb` | external dataset (`results/external/`) |
 | `notebooks/padding_probe.ipynb` | padding probe (`results/padding_probe.csv`) |
 
-The `hard.json` and attack-success notebooks clone the repo. They refuse to run if `src/` differs from the gate v2 freeze.
+The `hard.json` and attack-success notebooks clone the repo. They refuse to run if the gate files (`src/blue_team.py`, `src/config.py`) differ from the gate v2 freeze.
 
 ## ⚠️ Main limitations
 
 * One small model and one analyst prompt; three repeats on the same data, so the ranges understate variance.
 * Benign data is synthetic or lab-generated. Real SOC feeds have far fewer attacks, so false alarms cost more than these numbers show.
 * The guard is itself an LLM and can be jailbroken. Adaptive attackers are not tested.
-* `src/parsers/` and `--mode ops` are unit-tested only, never run on real forensic exports.
+* Scores labelled datasets only; there is no parser for real forensic exports.
 
 Full list: [docs/RESULTS.md](docs/RESULTS.md#limitations-of-the-evaluation).
 
 ## 📁 Layout
 
-* `src/`: red team, blue team, pipeline, parsers. `tests/`: tests. `scripts/`: evaluation scripts.
+* `src/`: red team, blue team, pipeline. `tests/`: tests. `scripts/`: evaluation scripts.
 * `data/`: `hard.json` (hand-built evasive set), `external.json` (built by `build_external.py`).
 * `results/`: raw CSVs, run reports and logs behind every number.
 * `docs/`: [RESULTS](docs/RESULTS.md), [DESIGN](docs/DESIGN.md), [EVALUATION](docs/EVALUATION.md) (frozen test protocol).

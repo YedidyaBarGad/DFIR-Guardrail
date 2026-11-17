@@ -32,8 +32,8 @@ STANDARD_LOG_ATTRS = {
 }
 
 
-class SIEMJSONFormatter(logging.Formatter):
-    """Structured JSON log formatter optimized for SIEM ingestion (e.g. Splunk).
+class JSONFormatter(logging.Formatter):
+    """JSON-lines log formatter.
 
     Ensures top-level fields: timestamp (ISO8601 UTC), level, logger,
     event_type, message, and dynamically serializes any contextual extra
@@ -71,11 +71,7 @@ class SIEMJSONFormatter(logging.Formatter):
 def get_logger(
     name: str = "dfir_guardrail", config: Optional[Config] = None
 ) -> logging.Logger:
-    """Configure and return a structured logger adhering to SIEM guidelines.
-
-    Supports both SIEM JSON and standard text formatting, with dual stream
-    and rotating file handlers.
-    """
+    """Configure and return a logger (JSON lines or text) with stdout and rotating file handlers."""
     settings = config or get_settings()
     logger = logging.getLogger(name)
 
@@ -94,7 +90,7 @@ def get_logger(
             datefmt="%Y-%m-%dT%H:%M:%SZ",
         )
     else:
-        formatter = SIEMJSONFormatter()
+        formatter = JSONFormatter()
 
     # Stream Handler (stdout)
     stream_handler = logging.StreamHandler(sys.stdout)
@@ -102,7 +98,7 @@ def get_logger(
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    # Rotating File Handler (for persistent log forwarders like Splunk Universal Forwarder)
+    # Rotating File Handler
     if settings.log_file:
         try:
             file_handler = logging.handlers.RotatingFileHandler(
